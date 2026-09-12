@@ -1,0 +1,6 @@
+{
+  "name": "CBT Sekolah SMP",
+  "description": "Aplikasi Computer-Based Test (CBT) SMP dengan 3 Role (Admin, Guru, Siswa), Generator Soal AI, Lockdown Anti-Curang, Multimedia, Impor/Ekspor Excel, dan Cetak PDF.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
