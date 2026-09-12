@@ -3,6 +3,15 @@
 -- Jalankan skrip ini pada menu "SQL Editor" di Dashboard Supabase Anda
 -- ==============================================================================
 
+-- BERSIHKAN TABEL LAMA (Jika ada)
+DROP TABLE IF EXISTS public.exam_attempts CASCADE;
+DROP TABLE IF EXISTS public.exams CASCADE;
+DROP TABLE IF EXISTS public.subjects CASCADE;
+DROP TABLE IF EXISTS public.users CASCADE;
+DROP TABLE IF EXISTS public.school_settings CASCADE;
+
+
+
 -- 1. Tabel Pengaturan Sekolah / Madrasah
 CREATE TABLE IF NOT EXISTS public.school_settings (
     id TEXT PRIMARY KEY DEFAULT 'default_school',
@@ -110,10 +119,19 @@ ALTER TABLE public.subjects ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.exams ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.exam_attempts ENABLE ROW LEVEL SECURITY;
 
+DROP POLICY IF EXISTS "Akses Penuh School Settings" ON public.school_settings;
 CREATE POLICY "Akses Penuh School Settings" ON public.school_settings FOR ALL USING (true) WITH CHECK (true);
+
+DROP POLICY IF EXISTS "Akses Penuh Users" ON public.users;
 CREATE POLICY "Akses Penuh Users" ON public.users FOR ALL USING (true) WITH CHECK (true);
+
+DROP POLICY IF EXISTS "Akses Penuh Subjects" ON public.subjects;
 CREATE POLICY "Akses Penuh Subjects" ON public.subjects FOR ALL USING (true) WITH CHECK (true);
+
+DROP POLICY IF EXISTS "Akses Penuh Exams" ON public.exams;
 CREATE POLICY "Akses Penuh Exams" ON public.exams FOR ALL USING (true) WITH CHECK (true);
+
+DROP POLICY IF EXISTS "Akses Penuh Exam Attempts" ON public.exam_attempts;
 CREATE POLICY "Akses Penuh Exam Attempts" ON public.exam_attempts FOR ALL USING (true) WITH CHECK (true);
 
 -- ==============================================================================
@@ -130,7 +148,15 @@ VALUES (
     'Genap',
     'Drs. H. Mulyadi, M.Pd.',
     '19750512 199903 1 002'
-) ON CONFLICT (id) DO NOTHING;
+) ON CONFLICT (id) DO UPDATE SET 
+    school_name = EXCLUDED.school_name,
+    school_npsn = EXCLUDED.school_npsn,
+    school_address = EXCLUDED.school_address,
+    school_city = EXCLUDED.school_city,
+    academic_year = EXCLUDED.academic_year,
+    semester = EXCLUDED.semester,
+    principal_name = EXCLUDED.principal_name,
+    principal_nip = EXCLUDED.principal_nip;
 
 -- Akun Default: Admin, Guru, dan Siswa
 INSERT INTO public.users (id, username, password, name, role, nip_nisn, class_grade, gender, subject_name)

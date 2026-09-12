@@ -20,6 +20,7 @@ export default function LoginView({
   users,
   onLoginSuccess,
   settings,
+  onOpenSupabaseModal,
 }: LoginViewProps) {
   const [username, setUsername] = useState('');
   const [password, setPassword] = useState('');
@@ -207,6 +208,16 @@ export default function LoginView({
       {/* Footer Minimalis */}
       <footer className="w-full py-4 text-center text-[11px] text-slate-400 relative z-10">
         © {new Date().getFullYear()} {settings.schoolName || 'SMP NEGERI 1 CERDAS MANDIRI'} • Sistem CBT
+        {onOpenSupabaseModal && (
+          <div className="mt-2">
+            <button 
+              onClick={onOpenSupabaseModal}
+              className="text-indigo-400/70 hover:text-indigo-400 transition cursor-pointer"
+            >
+              Konfigurasi Database (Supabase)
+            </button>
+          </div>
+        )}
       </footer>
     </div>
   );
