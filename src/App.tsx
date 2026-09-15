@@ -29,6 +29,7 @@ export default function App() {
   const [settings, setSettings] = useState<SchoolSettings>(getInitialSettings);
   const [currentUser, setCurrentUser] = useState<User | null>(null);
   const [isSupabaseModalOpen, setIsSupabaseModalOpen] = useState<boolean>(false);
+  const [isDataLoaded, setIsDataLoaded] = useState<boolean>(false);
 
   const prevUsersRef = useRef<User[]>(users);
   const prevSubjectsRef = useRef<Subject[]>(subjects);
@@ -54,6 +55,7 @@ export default function App() {
       if (sbSubjects && sbSubjects.length > 0) setSubjects(sbSubjects);
       if (sbExams && sbExams.length > 0) setExams(sbExams);
       if (sbAttempts) setAttempts(sbAttempts);
+      setIsDataLoaded(true);
     } catch (err) {
       console.warn('Gagal memuat data dari Supabase:', err);
     }
@@ -69,62 +71,58 @@ export default function App() {
   // Sync state changes with localStorage & Supabase (including Deletions)
   useEffect(() => {
     saveUsers(users);
-    if (getSupabaseConfig().isConfigured) {
-      users.forEach((u) => supabaseService.saveUser(u));
-      // Detect deletions
-      const currentIds = new Set(users.map(u => u.id));
+    if (getSupabaseConfig().isConfigured && isDataLoaded) {
+      users.forEach((item) => supabaseService.saveUser(item));
+      const currentIds = new Set(users.map(item => item.id));
       prevUsersRef.current.forEach(old => {
         if (!currentIds.has(old.id)) supabaseService.deleteUser(old.id);
       });
     }
     prevUsersRef.current = users;
-  }, [users]);
+  }, [users, isDataLoaded]);
 
   useEffect(() => {
     saveSubjects(subjects);
-    if (getSupabaseConfig().isConfigured) {
-      subjects.forEach((s) => supabaseService.saveSubject(s));
-      // Detect deletions
-      const currentIds = new Set(subjects.map(s => s.id));
+    if (getSupabaseConfig().isConfigured && isDataLoaded) {
+      subjects.forEach((item) => supabaseService.saveSubject(item));
+      const currentIds = new Set(subjects.map(item => item.id));
       prevSubjectsRef.current.forEach(old => {
         if (!currentIds.has(old.id)) supabaseService.deleteSubject(old.id);
       });
     }
     prevSubjectsRef.current = subjects;
-  }, [subjects]);
+  }, [subjects, isDataLoaded]);
 
   useEffect(() => {
     saveExams(exams);
-    if (getSupabaseConfig().isConfigured) {
-      exams.forEach((e) => supabaseService.saveExam(e));
-      // Detect deletions
-      const currentIds = new Set(exams.map(e => e.id));
+    if (getSupabaseConfig().isConfigured && isDataLoaded) {
+      exams.forEach((item) => supabaseService.saveExam(item));
+      const currentIds = new Set(exams.map(item => item.id));
       prevExamsRef.current.forEach(old => {
         if (!currentIds.has(old.id)) supabaseService.deleteExam(old.id);
       });
     }
     prevExamsRef.current = exams;
-  }, [exams]);
+  }, [exams, isDataLoaded]);
 
   useEffect(() => {
     saveAttempts(attempts);
-    if (getSupabaseConfig().isConfigured) {
-      attempts.forEach((a) => supabaseService.saveExamAttempt(a));
-      // Detect deletions
-      const currentIds = new Set(attempts.map(a => a.id));
+    if (getSupabaseConfig().isConfigured && isDataLoaded) {
+      attempts.forEach((item) => supabaseService.saveExamAttempt(item));
+      const currentIds = new Set(attempts.map(item => item.id));
       prevAttemptsRef.current.forEach(old => {
         if (!currentIds.has(old.id)) supabaseService.deleteExamAttempt(old.id);
       });
     }
     prevAttemptsRef.current = attempts;
-  }, [attempts]);
+  }, [attempts, isDataLoaded]);
 
   useEffect(() => {
     saveSettings(settings);
-    if (getSupabaseConfig().isConfigured) {
+    if (getSupabaseConfig().isConfigured && isDataLoaded) {
       supabaseService.saveSchoolSettings(settings);
     }
-  }, [settings]);
+  }, [settings, isDataLoaded]);
 
   // Fungsi sinkronisasi manual saat tombol "Simpan & Sinkronkan" diklik di modal
   const handleManualSync = async () => {
