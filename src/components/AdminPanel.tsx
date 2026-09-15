@@ -288,6 +288,10 @@ export default function AdminPanel({
     );
   });
 
+  // Get available classes from students
+  const availableClasses = Array.from(new Set(users.filter(u => u.role === 'siswa' && u.classGrade).map(u => u.classGrade as string))).sort();
+  if (availableClasses.length === 0) availableClasses.push('7A', '7B', '7C', '8A', '8B', '8C', '9A', '9B', '9C');
+
   const filteredSubjects = subjects.filter(
     (m) =>
       m.name.toLowerCase().includes(searchTerm.toLowerCase()) ||
@@ -2532,7 +2536,7 @@ export default function AdminPanel({
             </div>
 
             <form onSubmit={handleAddMapel} className="space-y-3 text-xs">
-              <div className="grid grid-cols-2 gap-3">
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
                 <div>
                   <label className="block font-semibold text-slate-700 mb-1">Kode Mapel</label>
                   <input
@@ -2544,19 +2548,32 @@ export default function AdminPanel({
                     required
                   />
                 </div>
-                <div>
-                  <label className="block font-semibold text-slate-700 mb-1">Tingkat / Jenjang</label>
-                  <select
-                    value={newMapel.gradeLevel}
-                    onChange={(e) => setNewMapel({ ...newMapel, gradeLevel: e.target.value })}
-                    className="w-full p-2.5 bg-slate-50 border border-slate-300 rounded-xl"
-                  >
-                    <option value="SMP Kelas 7">SMP Kelas 7</option>
-                    <option value="SMP Kelas 8">SMP Kelas 8</option>
-                    <option value="SMP Kelas 9">SMP Kelas 9</option>
-                    <option value="Semua Tingkat">Semua Tingkat</option>
-                  </select>
+                
+                <div className="col-span-2">
+                  <label className="block font-semibold text-slate-700 mb-1">Kelas / Sasaran (Pilih satu atau lebih)</label>
+                  <div className="flex flex-wrap gap-2">
+                    {availableClasses.map(cls => {
+                      const currentGrades = newMapel.gradeLevel ? newMapel.gradeLevel.split(', ') : [];
+                      return (
+                        <label key={cls} className="flex items-center gap-1.5 cursor-pointer bg-slate-50 border border-slate-200 px-3 py-1.5 rounded-lg hover:bg-slate-100">
+                          <input 
+                            type="checkbox" 
+                            className="rounded text-rose-600 focus:ring-rose-500"
+                            checked={currentGrades.includes(cls)}
+                            onChange={(e) => {
+                              const updated = e.target.checked 
+                                ? [...currentGrades, cls]
+                                : currentGrades.filter(c => c !== cls);
+                              setNewMapel({ ...newMapel, gradeLevel: updated.join(', ') });
+                            }}
+                          />
+                          <span className="text-xs font-semibold text-slate-700">{cls}</span>
+                        </label>
+                      );
+                    })}
+                  </div>
                 </div>
+
               </div>
 
               <div>
@@ -2626,7 +2643,7 @@ export default function AdminPanel({
             </div>
 
             <form onSubmit={handleSaveEditMapel} className="space-y-3 text-xs">
-              <div className="grid grid-cols-2 gap-3">
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
                 <div>
                   <label className="block font-semibold text-slate-700 mb-1">Kode Mapel</label>
                   <input
@@ -2637,19 +2654,32 @@ export default function AdminPanel({
                     required
                   />
                 </div>
-                <div>
-                  <label className="block font-semibold text-slate-700 mb-1">Tingkat / Jenjang</label>
-                  <select
-                    value={editMapelForm.gradeLevel}
-                    onChange={(e) => setEditMapelForm({ ...editMapelForm, gradeLevel: e.target.value })}
-                    className="w-full p-2.5 bg-slate-50 border border-slate-300 rounded-xl"
-                  >
-                    <option value="SMP Kelas 7">SMP Kelas 7</option>
-                    <option value="SMP Kelas 8">SMP Kelas 8</option>
-                    <option value="SMP Kelas 9">SMP Kelas 9</option>
-                    <option value="Semua Tingkat">Semua Tingkat</option>
-                  </select>
+                
+                <div className="col-span-2">
+                  <label className="block font-semibold text-slate-700 mb-1">Kelas / Sasaran (Pilih satu atau lebih)</label>
+                  <div className="flex flex-wrap gap-2">
+                    {availableClasses.map(cls => {
+                      const currentGrades = editMapelForm.gradeLevel ? editMapelForm.gradeLevel.split(', ') : [];
+                      return (
+                        <label key={cls} className="flex items-center gap-1.5 cursor-pointer bg-slate-50 border border-slate-200 px-3 py-1.5 rounded-lg hover:bg-slate-100">
+                          <input 
+                            type="checkbox" 
+                            className="rounded text-indigo-600 focus:ring-indigo-500"
+                            checked={currentGrades.includes(cls)}
+                            onChange={(e) => {
+                              const updated = e.target.checked 
+                                ? [...currentGrades, cls]
+                                : currentGrades.filter(c => c !== cls);
+                              setEditMapelForm({ ...editMapelForm, gradeLevel: updated.join(', ') });
+                            }}
+                          />
+                          <span className="text-xs font-semibold text-slate-700">{cls}</span>
+                        </label>
+                      );
+                    })}
+                  </div>
                 </div>
+
               </div>
 
               <div>

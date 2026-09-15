@@ -159,7 +159,7 @@ export default function GuruPanel({
     title: '',
     subjectId: subjects[0]?.id || '',
     subjectName: subjects[0]?.name || '',
-    targetClasses: ['8A', '8B'],
+    targetClasses: [],
     startTime: new Date().toISOString().slice(0, 16),
     endTime: new Date(Date.now() + 3600 * 1000 * 48).toISOString().slice(0, 16),
     durationMinutes: 60,
@@ -185,7 +185,7 @@ export default function GuruPanel({
   const [editExamForm, setEditExamForm] = useState({
     title: '',
     subjectId: '',
-    targetClasses: ['8A', '8B'] as string[],
+    targetClasses: [] as string[],
     durationMinutes: 60,
     startTime: '',
     endTime: '',
@@ -1739,7 +1739,14 @@ export default function GuruPanel({
         const uniqueSubjects = Array.from(new Set(exams.map((e) => e.subjectName).filter(Boolean)));
 
         // Filter paket ujian berdasarkan Mapel yang dipilih di Bank Soal
-        const filteredPackages = exams.filter((e) => {
+        // Get available classes from students
+  const availableClasses = Array.from(new Set(users.filter(u => u.role === 'siswa' && u.classGrade).map(u => u.classGrade as string))).sort();
+  if (availableClasses.length === 0) availableClasses.push('7A', '7B', '7C', '8A', '8B', '8C', '9A', '9B', '9C');
+
+  // Filter subjects for current teacher
+  const teacherSubjects = subjects.filter(s => s.teacherName === currentUser.name);
+
+  const filteredPackages = exams.filter((e) => {
           if (bankSoalSubjectFilter === 'all') return true;
           return e.subjectName === bankSoalSubjectFilter;
         });
@@ -2944,7 +2951,7 @@ export default function GuruPanel({
                     onChange={(e) => setAiSubject(e.target.value)}
                     className="w-full p-2.5 bg-slate-50 border border-slate-300 rounded-xl"
                   >
-                    {subjects.map((s) => (
+                    {teacherSubjects.map((s) => (
                       <option key={s.id} value={s.name}>
                         {s.name}
                       </option>
@@ -3183,7 +3190,7 @@ export default function GuruPanel({
                   onChange={(e) => setNewExamForm({ ...newExamForm, subjectId: e.target.value })}
                   className="w-full p-2.5 bg-slate-50 border border-slate-300 rounded-xl"
                 >
-                  {subjects.map((s) => (
+                  {teacherSubjects.map((s) => (
                     <option key={s.id} value={s.id}>
                       {s.name} ({s.code})
                     </option>
@@ -3816,12 +3823,60 @@ export default function GuruPanel({
                   onChange={(e) => setEditExamForm({ ...editExamForm, subjectId: e.target.value })}
                   className="w-full p-2.5 bg-slate-50 border border-slate-300 rounded-xl"
                 >
-                  {subjects.map((s) => (
+                  {teacherSubjects.map((s) => (
                     <option key={s.id} value={s.id}>
                       {s.name} ({s.code})
                     </option>
                   ))}
                 </select>
+              </div>
+
+              <div>
+                <label className="block font-bold text-slate-700 mb-1">Kelas Sasaran (Pilih satu atau lebih)</label>
+                <div className="flex flex-wrap gap-2">
+                  {availableClasses.map(cls => (
+                    <label key={cls} className="flex items-center gap-1.5 cursor-pointer bg-slate-50 border border-slate-200 px-3 py-1.5 rounded-lg hover:bg-slate-100">
+                      <input 
+                        type="checkbox" 
+                        className="rounded text-indigo-600 focus:ring-indigo-500"
+                        checked={editExamForm.targetClasses?.includes(cls)}
+                        onChange={(e) => {
+                          const current = editExamForm.targetClasses || [];
+                          const updated = e.target.checked 
+                            ? [...current, cls]
+                            : current.filter(c => c !== cls);
+                          setEditExamForm({ ...editExamForm, targetClasses: updated });
+                        }}
+                      />
+                      <span className="text-xs font-semibold text-slate-700">{cls}</span>
+                    </label>
+                  ))}
+                </div>
+              </div>
+
+
+              
+              <div>
+                <label className="block font-bold text-slate-700 mb-1">Kelas Sasaran (Pilih satu atau lebih)</label>
+                <div className="flex flex-wrap gap-2">
+                  {availableClasses.map(cls => (
+                    <label key={cls} className="flex items-center gap-1.5 cursor-pointer bg-slate-50 border border-slate-200 px-3 py-1.5 rounded-lg hover:bg-slate-100">
+                      <input 
+                        type="checkbox" 
+                        className="rounded text-indigo-600 focus:ring-indigo-500"
+                        checked={newExamForm.targetClasses.includes(cls)}
+                        onChange={(e) => {
+                          const current = newExamForm.targetClasses || [];
+                          const updated = e.target.checked 
+                            ? [...current, cls]
+                            : current.filter(c => c !== cls);
+                          setNewExamForm({ ...newExamForm, targetClasses: updated });
+                        }}
+                      />
+                      <span className="text-xs font-semibold text-slate-700">{cls}</span>
+                    </label>
+                  ))}
+                </div>
               </div>
 
               <div className="grid grid-cols-2 gap-3">

@@ -41,15 +41,15 @@ export const supabaseService = {
     try {
       const { error } = await supabase.from('school_settings').upsert({
         id: 'default_school',
-        app_name: settings.appName || 'SMART CBT PRO',
+        
         school_name: settings.schoolName,
-        school_npsn: settings.schoolNpsn,
-        school_address: settings.schoolAddress,
-        school_city: settings.schoolCity,
+        school_npsn: settings.schoolNpsn || '',
+        school_address: settings.schoolAddress || '',
+        school_city: settings.schoolCity || '',
         academic_year: settings.academicYear,
         semester: settings.semester,
-        principal_name: settings.principalName,
-        principal_nip: settings.principalNip,
+        principal_name: settings.principalName || '',
+        principal_nip: settings.principalNip || '',
         logo_url: settings.logoUrl || '',
         updated_at: new Date().toISOString(),
       });
