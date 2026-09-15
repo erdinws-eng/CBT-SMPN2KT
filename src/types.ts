@@ -137,6 +137,9 @@ export interface SchoolSettings {
   principalName: string;
   principalNip: string;
   logoUrl?: string;
+  dinasName?: string;
+  kabupatenName?: string;
+  signatureLocation?: string;
 }
 
 export interface SystemAuditLog {

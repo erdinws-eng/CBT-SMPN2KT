@@ -7,6 +7,7 @@ interface RekapPrintModalProps {
   exam: Exam | null;
   attempts: ExamAttempt[];
   settings: SchoolSettings;
+  teacherNip?: string;
 }
 
 export default function RekapPrintModal({
@@ -15,6 +16,7 @@ export default function RekapPrintModal({
   exam,
   attempts,
   settings,
+  teacherNip,
 }: RekapPrintModalProps) {
   if (!isOpen || !exam) return null;
 
@@ -66,7 +68,7 @@ export default function RekapPrintModal({
         <div id="printable-rekap-sheet" className="p-8 sm:p-12 text-slate-900 bg-white max-h-[80vh] overflow-y-auto print:max-h-none print:overflow-visible print:p-0">
           {/* KOP SURAT SEKOLAH */}
           <div className="border-b-4 border-double border-slate-900 pb-4 mb-6 flex items-center gap-4">
-            <div className="w-20 h-20 shrink-0 flex items-center justify-center">
+            <div className="w-24 sm:w-28 h-24 sm:h-28 shrink-0 flex items-center justify-center">
               {settings.logoUrl ? (
                 <img src={settings.logoUrl} alt="Logo" className="max-w-full max-h-full object-contain" />
               ) : (
@@ -76,16 +78,19 @@ export default function RekapPrintModal({
               )}
             </div>
             <div className="flex-1 text-center">
-              <h2 className="text-lg sm:text-xl font-black uppercase tracking-wider text-slate-900">
-                PEMERINTAH KOTA / KABUPATEN PENDIDIKAN
-              </h2>
-              <h1 className="text-xl sm:text-2xl font-black uppercase tracking-wide text-slate-900">
+              <p className="text-lg sm:text-xl font-black uppercase tracking-wider text-slate-900 mb-0.5">
+                {settings.dinasName || 'DINAS PENDIDIKAN DAN KEBUDAYAAN'}
+              </p>
+              <p className="text-xl sm:text-2xl font-black uppercase tracking-wider text-slate-900 mb-1">
+                {settings.kabupatenName || 'PEMERINTAH KABUPATEN KOTABARU'}
+              </p>
+              <h2 className="text-2xl sm:text-3xl font-black uppercase tracking-wider text-slate-900 mb-1.5">
                 {settings.schoolName}
-              </h1>
-              <p className="text-xs text-slate-600 font-medium">
+              </h2>
+              <p className="text-sm text-slate-800 font-semibold mb-0.5">
                 {settings.schoolAddress} • {settings.schoolCity} • NPSN: {settings.schoolNpsn}
               </p>
-              <p className="text-xs text-slate-600 font-medium">
+              <p className="text-sm text-slate-800 font-semibold">
                 Tahun Ajaran: {settings.academicYear} | Semester: {settings.semester}
               </p>
             </div>
@@ -99,29 +104,32 @@ export default function RekapPrintModal({
           </div>
 
           {/* EXAM META GRID */}
-          <div className="grid grid-cols-2 gap-x-8 gap-y-2 text-xs mb-6 bg-slate-50 p-4 rounded-xl border border-slate-200 print:bg-transparent print:border-none print:p-0">
-            <div>
-              <span className="text-slate-500 font-medium">Mata Pelajaran: </span>
+          <div className="grid grid-cols-2 gap-x-8 gap-y-4 text-xs mb-6 bg-slate-50 p-4 rounded-xl border border-slate-200 print:bg-transparent print:border-none print:p-0">
+            <div className="grid grid-cols-[100px_10px_1fr] sm:grid-cols-[120px_10px_1fr] gap-x-2 gap-y-2">
+              <span className="text-slate-500 font-medium">Mata Pelajaran</span>
+              <span className="text-slate-500">:</span>
               <strong className="text-slate-900">{exam.subjectName}</strong>
-            </div>
-            <div>
-              <span className="text-slate-500 font-medium">Guru Pengampu: </span>
-              <strong className="text-slate-900">{exam.teacherName}</strong>
-            </div>
-            <div>
-              <span className="text-slate-500 font-medium">Judul Ujian: </span>
+              
+              <span className="text-slate-500 font-medium">Judul Ujian</span>
+              <span className="text-slate-500">:</span>
               <strong className="text-slate-900">{exam.title}</strong>
-            </div>
-            <div>
-              <span className="text-slate-500 font-medium">Kriteria Ketuntasan Minimal (KKM): </span>
-              <strong className="text-slate-900">{kkm}</strong>
-            </div>
-            <div>
-              <span className="text-slate-500 font-medium">Kelas Sasaran: </span>
+
+              <span className="text-slate-500 font-medium">Kelas Sasaran</span>
+              <span className="text-slate-500">:</span>
               <strong className="text-slate-900">{exam.targetClasses.join(', ')}</strong>
             </div>
-            <div>
-              <span className="text-slate-500 font-medium">Tanggal Cetak: </span>
+            
+            <div className="grid grid-cols-[110px_10px_1fr] sm:grid-cols-[130px_10px_1fr] gap-x-2 gap-y-2">
+              <span className="text-slate-500 font-medium">Guru Pengampu</span>
+              <span className="text-slate-500">:</span>
+              <strong className="text-slate-900">{exam.teacherName}</strong>
+
+              <span className="text-slate-500 font-medium">Nilai KKM</span>
+              <span className="text-slate-500">:</span>
+              <strong className="text-slate-900">{kkm}</strong>
+
+              <span className="text-slate-500 font-medium">Tanggal Cetak</span>
+              <span className="text-slate-500">:</span>
               <strong className="text-slate-900">
                 {new Date().toLocaleDateString('id-ID', {
                   day: 'numeric',
@@ -131,7 +139,6 @@ export default function RekapPrintModal({
               </strong>
             </div>
           </div>
-
           {/* TABLE OF RECAP RESULTS (NISN and KELAS explicitly separated) */}
           <div className="overflow-x-auto mb-8">
             <table className="w-full text-left text-xs border border-slate-400 border-collapse">
@@ -201,7 +208,7 @@ export default function RekapPrintModal({
             </div>
             <div className="text-center">
               <p className="text-slate-500 mb-1">
-                {settings.schoolCity},{' '}
+                {settings.signatureLocation || settings.schoolCity},{' '}
                 {new Date().toLocaleDateString('id-ID', {
                   day: 'numeric',
                   month: 'long',
@@ -210,7 +217,7 @@ export default function RekapPrintModal({
               </p>
               <p className="font-bold text-slate-800 mb-16">Guru Mata Pelajaran</p>
               <p className="font-bold text-slate-900 underline text-sm">{exam.teacherName}</p>
-              <p className="text-slate-500 font-mono">NIP. -</p>
+              <p className="text-slate-500 font-mono">NIP. {teacherNip || "-"}</p>
             </div>
           </div>
         </div>

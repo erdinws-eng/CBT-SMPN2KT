@@ -258,9 +258,9 @@ ON CONFLICT (id) DO NOTHING;
 -- Data Mata Pelajaran Awal
 INSERT INTO public.subjects (id, code, name, grade_level, teacher_name)
 VALUES 
-    ('sub_1', 'IPA-8', 'Ilmu Pengetahuan Alam', 'SMP Kelas 8', 'Dra. Siti Rahmawati, M.Pd.'),
-    ('sub_2', 'MAT-8', 'Matematika', 'SMP Kelas 8', 'Budi Santoso, S.Pd.'),
-    ('sub_3', 'BIN-8', 'Bahasa Indonesia', 'SMP Kelas 8', 'Nurul Hidayah, S.Pd.')
+    ('sub_1', 'IPA-8', 'Ilmu Pengetahuan Alam', '7A, 7B', 'Dra. Siti Rahmawati, M.Pd.'),
+    ('sub_2', 'MAT-8', 'Matematika', '7A, 7B', 'Budi Santoso, S.Pd.'),
+    ('sub_3', 'BIN-8', 'Bahasa Indonesia', '7A, 7B', 'Nurul Hidayah, S.Pd.')
 ON CONFLICT (id) DO NOTHING;
 `;
 

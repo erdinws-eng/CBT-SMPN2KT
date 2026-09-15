@@ -146,13 +146,13 @@ export function downloadTemplateMapelExcel() {
     {
       'Kode Mapel': 'SEN-8',
       'Nama Mata Pelajaran': 'Seni Budaya',
-      'Jenjang Tingkat': 'SMP Kelas 8',
+      'Jenjang Tingkat': '7A, 7B',
       'Guru Pengampu': 'Irma Suryani, S.Sn.',
     },
     {
       'Kode Mapel': 'PJK-8',
       'Nama Mata Pelajaran': 'Pendidikan Jasmani (PJOK)',
-      'Jenjang Tingkat': 'SMP Kelas 8',
+      'Jenjang Tingkat': '7A, 7B',
       'Guru Pengampu': 'Hendra Wijaya, S.Pd.',
     },
   ];
@@ -172,7 +172,7 @@ export async function parseMapelExcel(file: File): Promise<Subject[]> {
     id: 'sub_import_' + Date.now() + '_' + i,
     code: String(r['Kode Mapel'] || r['Kode'] || `MAPEL-${i + 1}`).trim().toUpperCase(),
     name: String(r['Nama Mata Pelajaran'] || r['Nama'] || 'Mata Pelajaran').trim(),
-    gradeLevel: String(r['Jenjang Tingkat'] || r['Jenjang'] || 'SMP Kelas 8').trim(),
+    gradeLevel: String(r['Jenjang Tingkat'] || r['Jenjang'] || '7A, 7B').trim(),
     teacherName: r['Guru Pengampu'] ? String(r['Guru Pengampu']).trim() : undefined,
   }));
 }

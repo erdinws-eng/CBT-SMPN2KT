@@ -28,6 +28,9 @@ export const INITIAL_SCHOOL_SETTINGS: SchoolSettings = {
   principalName: 'H. Suryadi Pratama, M.Pd.',
   principalNip: '197204181997021003',
   logoUrl: 'https://images.unsplash.com/photo-1546410531-bb4caa6b424d?w=160&auto=format&fit=crop&q=80',
+  dinasName: 'PEMERINTAH KABUPATEN KOTABARU',
+  kabupatenName: 'DINAS PENDIDIKAN DAN KEBUDAYAAN',
+  signatureLocation: 'Kotabaru',
 };
 
 export const INITIAL_USERS: User[] = [
@@ -105,12 +108,12 @@ export const INITIAL_USERS: User[] = [
 ];
 
 export const INITIAL_SUBJECTS: Subject[] = [
-  { id: 'sub_1', code: 'IPA-8', name: 'Ilmu Pengetahuan Alam (IPA)', gradeLevel: 'SMP Kelas 8', teacherName: 'Drs. Bambang Sudarsono, M.Pd.' },
-  { id: 'sub_2', code: 'MAT-8', name: 'Matematika', gradeLevel: 'SMP Kelas 8', teacherName: 'Drs. Bambang Sudarsono, M.Pd.' },
-  { id: 'sub_3', code: 'BIN-8', name: 'Bahasa Indonesia', gradeLevel: 'SMP Kelas 8', teacherName: 'Siti Rahmawati, S.Pd.' },
-  { id: 'sub_4', code: 'BIG-8', name: 'Bahasa Inggris', gradeLevel: 'SMP Kelas 8', teacherName: 'Nurul Hidayah, S.Pd.' },
-  { id: 'sub_5', code: 'PPKN-8', name: 'Pendidikan Pancasila', gradeLevel: 'SMP Kelas 8', teacherName: 'Drs. Bambang Sudarsono, M.Pd.' },
-  { id: 'sub_6', code: 'IPS-8', name: 'Ilmu Pengetahuan Sosial (IPS)', gradeLevel: 'SMP Kelas 8', teacherName: 'Siti Rahmawati, S.Pd.' },
+  { id: 'sub_1', code: 'IPA-8', name: 'Ilmu Pengetahuan Alam (IPA)', gradeLevel: '7A, 7B', teacherName: 'Drs. Bambang Sudarsono, M.Pd.' },
+  { id: 'sub_2', code: 'MAT-8', name: 'Matematika', gradeLevel: '7A, 7B', teacherName: 'Drs. Bambang Sudarsono, M.Pd.' },
+  { id: 'sub_3', code: 'BIN-8', name: 'Bahasa Indonesia', gradeLevel: '7A, 7B', teacherName: 'Siti Rahmawati, S.Pd.' },
+  { id: 'sub_4', code: 'BIG-8', name: 'Bahasa Inggris', gradeLevel: '7A, 7B', teacherName: 'Nurul Hidayah, S.Pd.' },
+  { id: 'sub_5', code: 'PPKN-8', name: 'Pendidikan Pancasila', gradeLevel: '7A, 7B', teacherName: 'Drs. Bambang Sudarsono, M.Pd.' },
+  { id: 'sub_6', code: 'IPS-8', name: 'Ilmu Pengetahuan Sosial (IPS)', gradeLevel: '7A, 7B', teacherName: 'Siti Rahmawati, S.Pd.' },
 ];
 
 export const INITIAL_EXAMS: Exam[] = [
