@@ -2,9 +2,8 @@ import { createClient, SupabaseClient } from '@supabase/supabase-js';
 
 // Baca dari environment variable atau localStorage
 export const getSupabaseConfig = () => {
-  const metaEnv = (import.meta as any)?.env || {};
-  const envUrl = metaEnv.VITE_SUPABASE_URL || '';
-  const envKey = metaEnv.VITE_SUPABASE_ANON_KEY || '';
+  const envUrl = import.meta.env.VITE_SUPABASE_URL || '';
+  const envKey = import.meta.env.VITE_SUPABASE_ANON_KEY || '';
 
   const localUrl = localStorage.getItem('cbt_supabase_url') || '';
   const localKey = localStorage.getItem('cbt_supabase_key') || '';
