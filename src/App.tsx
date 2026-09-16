@@ -11,6 +11,7 @@ import {
   saveExams,
   saveAttempts,
   saveSettings,
+  sanitizeExams,
 } from './lib/storage';
 import { getSupabase, getSupabaseConfig } from './lib/supabase';
 import { supabaseService } from './services/supabaseService';
@@ -53,7 +54,7 @@ export default function App() {
       if (sbSettings) setSettings(sbSettings);
       if (sbUsers && sbUsers.length > 0) setUsers(sbUsers);
       if (sbSubjects && sbSubjects.length > 0) setSubjects(sbSubjects);
-      if (sbExams && sbExams.length > 0) setExams(sbExams);
+      if (sbExams && sbExams.length > 0) setExams(sanitizeExams(sbExams));
       if (sbAttempts) setAttempts(sbAttempts);
       setIsDataLoaded(true);
     } catch (err) {
@@ -148,6 +149,10 @@ export default function App() {
     await loadDataFromSupabase();
   };
 
+  const handleUpdateExams = useCallback((newExams: Exam[]) => {
+    setExams(sanitizeExams(newExams));
+  }, []);
+
   // Role switch handler from Navbar
   const handleRoleSwitch = (newRole: UserRole) => {
     const targetUser = users.find((u) => u.role === newRole);
@@ -222,7 +227,7 @@ export default function App() {
               students={students}
               attempts={attempts}
               settings={settings}
-              onUpdateExams={setExams}
+              onUpdateExams={handleUpdateExams}
               onUpdateAttempts={setAttempts}
               onOpenSupabaseModal={() => setIsSupabaseModalOpen(true)}
               onLogout={handleLogout}

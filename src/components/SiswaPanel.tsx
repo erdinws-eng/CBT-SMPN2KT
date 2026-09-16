@@ -1493,7 +1493,7 @@ export default function SiswaPanel({
 
                 return (
                   <button
-                    key={q.id}
+                    key={`${q.id}_${qIndex}`}
                     type="button"
                     onClick={() => setCurrentQuestionIndex(qIndex)}
                     className={`h-10 rounded-xl text-xs font-bold transition flex items-center justify-center cursor-pointer ${bgClass} ${

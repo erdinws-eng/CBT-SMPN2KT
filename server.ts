@@ -75,12 +75,32 @@ app.post("/api/ai/generate-questions", async (req, res) => {
 
     const ai = getGeminiClient();
 
+    const typeLabelMap: Record<string, string> = {
+      pilihan_ganda: 'Pilihan Ganda (Single Choice: 4 opsi pilihan A, B, C, D dan tepat 1 jawaban benar pada "correctAnswer")',
+      pilihan_ganda_kompleks: 'Pilihan Ganda Kompleks (Multi Choice: 4-5 opsi dan minimal 2 jawaban benar pada array "correctAnswers")',
+      essay: 'Uraian / Essay (pertanyaan berbasis analisis/studi kasus, sertakan panduan rubrik penilaian pada "explanation")',
+      isian: 'Isian Singkat (pertanyaan langsung dengan jawaban singkat pasti berupa kata/angka pada "correctAnswer")',
+      menjodohkan: 'Menjodohkan (pertanyaan dengan 3-4 pasang pernyataan premis & pasangan cocok pada array "matchingPairs")',
+      benar_salah: 'Benar / Salah (tabel berisi 2-3 pernyataan yang masing-masing bernilai "Benar" atau "Salah" pada array "trueFalseStatements")',
+    };
+
+    const requestedTypeDetails = Array.isArray(questionTypes) && questionTypes.length > 0
+      ? questionTypes.map((t: string) => `- "${t}": ${typeLabelMap[t] || t}`).join("\n")
+      : '- "pilihan_ganda": Pilihan Ganda (Single Choice)';
+
     const systemPrompt = `Anda adalah pakar pembuat soal ujian kurikulum nasional Indonesia untuk jenjang Sekolah Menengah Pertama (SMP/MTs) yang berstandar Asesmen Nasional (AKM) dan Kurikulum Merdeka.
-Buatlah soal-soal ujian berkualitas tinggi dan variatif untuk mata pelajaran "${subject}", jenjang "${gradeLevel}", materi pokok "${topic}".
+Buatlah soal-soal ujian berkualitas tinggi untuk mata pelajaran "${subject}", jenjang "${gradeLevel}", materi pokok "${topic}".
 Tingkat kesulitan: ${difficulty}.
-Jumlah soal: ${count}.
-Tipe soal yang diminta: ${JSON.stringify(questionTypes)}.
-Catatan khusus: ${additionalInstructions || "Sertakan stimulus teks atau skenario kontekstual dunia nyata SMP."}
+Jumlah soal: Tepat ${count} butir soal.
+
+ATURAN WAJIB JENIS SOAL:
+Setiap soal yang dihasilkan HARUS memiliki nilai field "type" yang diambil HANYA dari jenis berikut:
+${requestedTypeDetails}
+
+PENTING:
+- Jika hanya 1 jenis soal yang tercantum di atas, SELURUH ${count} butir soal HARUS berjenis tersebut!
+- Jika ada beberapa jenis soal, variasikan tipe soal di antara jenis-jenis yang diminta saja. JANGAN membuat jenis soal di luar daftar di atas.
+- Catatan materi: ${additionalInstructions || "Sertakan stimulus teks atau skenario kontekstual dunia nyata SMP."}
 
 Format Output WAJIB berupa JSON Array of objects (VALID JSON ONLY, tanpa komentar atau teks pembuka/penutup):
 [
@@ -107,13 +127,19 @@ Format Output WAJIB berupa JSON Array of objects (VALID JSON ONLY, tanpa komenta
     let lastError: any = null;
     let successfulModel = "";
 
+    const requestedTypesText = Array.isArray(questionTypes) && questionTypes.length > 0
+      ? questionTypes.join(", ")
+      : "pilihan_ganda";
+
     // Try candidate models in sequence with fallback
     for (const modelName of CANDIDATE_MODELS) {
       try {
         console.log(`[AI Generator] Mencoba model: ${modelName}...`);
         const response = await ai.models.generateContent({
           model: modelName,
-          contents: `Buatlah tepat ${count} butir soal ${subject} materi "${topic}" sesuai petunjuk sistem. Seluruh konten dalam bahasa Indonesia yang baku dan komunikatif. Output murni JSON array.`,
+          contents: `Buatlah tepat ${count} butir soal ${subject} materi "${topic}".
+JENIS SOAL YANG WAJIB DIBUAT: ${requestedTypesText}.
+Semua butir soal HARUS berjenis sesuai daftar di atas. Seluruh konten dalam bahasa Indonesia yang baku dan komunikatif untuk siswa SMP. Output murni JSON array.`,
           config: {
             systemInstruction: systemPrompt,
             responseMimeType: "application/json",
@@ -156,11 +182,35 @@ Format Output WAJIB berupa JSON Array of objects (VALID JSON ONLY, tanpa komenta
 
     const rawList = Array.isArray(parsed) ? parsed : [parsed];
 
-    // Sanitize and ensure standard Question schema
+    // Sanitize and ensure standard Question schema with guaranteed unique IDs
     const questions = rawList.map((item: any, idx: number) => {
-      const qId = item.id || `q_ai_${Date.now()}_${idx + 1}`;
-      const qType = item.type || "pilihan_ganda";
-      const options = Array.isArray(item.options) ? item.options : [];
+      const uniqueSuffix = Math.random().toString(36).substring(2, 8);
+      const qId = `q_ai_${Date.now()}_${idx + 1}_${uniqueSuffix}`;
+      
+      // Robust question type normalization
+      let qType = "pilihan_ganda";
+      const rawType = String(item.type || "").toLowerCase().trim();
+      if (rawType.includes("kompleks") || rawType.includes("multiple_choice") || rawType === "pg_kompleks") {
+        qType = "pilihan_ganda_kompleks";
+      } else if (rawType.includes("isi") || rawType.includes("short") || rawType === "fill_in") {
+        qType = "isian";
+      } else if (rawType.includes("uraian") || rawType.includes("essay")) {
+        qType = "essay";
+      } else if (rawType.includes("jodoh") || rawType.includes("matching") || rawType === "match") {
+        qType = "menjodohkan";
+      } else if (rawType.includes("benar") || rawType.includes("salah") || rawType.includes("true_false") || rawType === "tf") {
+        qType = "benar_salah";
+      } else if (rawType.includes("pilihan") || rawType.includes("ganda") || rawType === "single_choice") {
+        qType = "pilihan_ganda";
+      }
+
+      // ONLY pilihan_ganda & pilihan_ganda_kompleks should have options array.
+      // For isian, essay, menjodohkan, benar_salah, options MUST be undefined.
+      const isChoiceType = qType === "pilihan_ganda" || qType === "pilihan_ganda_kompleks";
+      const options = isChoiceType && Array.isArray(item.options) && item.options.length > 0
+        ? item.options
+        : (isChoiceType ? ["A. Pilihan A", "B. Pilihan B", "C. Pilihan C", "D. Pilihan D"] : undefined);
+
       let correctAnswer = item.correctAnswer || "";
       if (!correctAnswer && Array.isArray(item.correctAnswers) && item.correctAnswers.length > 0) {
         correctAnswer = item.correctAnswers[0];

@@ -96,11 +96,14 @@ export default function GuruPanel({
   const [activeTab, setActiveTab] = useState<'dashboard' | 'jadwal' | 'bank_soal' | 'monitoring' | 'rekap' | 'evaluasi' | 'riwayat_siswa'>('dashboard');
   const [searchAttemptQuery, setSearchAttemptQuery] = useState('');
   const [selectedClassFilter, setSelectedClassFilter] = useState('');
-  const [riwayatSelectedExamId, setRiwayatSelectedExamId] = useState<string>('');
-  const [riwayatSelectedClass, setRiwayatSelectedClass] = useState<string>('');
+  const [selectedExamId, setSelectedExamId] = useState<string>(exams[0]?.id || '');
+  const [riwayatSelectedExamId, setRiwayatSelectedExamId] = useState<string>(exams[0]?.id || '');
+  const [riwayatSelectedClass, setRiwayatSelectedClass] = useState<string>('Semua Kelas');
   const [isRiwayatModalOpen, setIsRiwayatModalOpen] = useState(false);
   const [selectedRiwayatStudent, setSelectedRiwayatStudent] = useState<{studentId: string, studentName: string, studentNisn: string} | null>(null);
-  const [selectedExamId, setSelectedExamId] = useState<string>(exams[0]?.id || '');
+  const [isDeleteAllRiwayatModalOpen, setIsDeleteAllRiwayatModalOpen] = useState(false);
+  const [studentToDeleteFromRiwayat, setStudentToDeleteFromRiwayat] = useState<{studentId: string, studentName: string, studentNisn: string} | null>(null);
+  const [confirmingAttemptId, setConfirmingAttemptId] = useState<string | null>(null);
   const [bankSoalSubjectFilter, setBankSoalSubjectFilter] = useState<string>('all');
   const [bankSoalSearchQuery, setBankSoalSearchQuery] = useState<string>('');
   const [bankSoalTypeFilter, setBankSoalTypeFilter] = useState<string>('all');
@@ -119,16 +122,40 @@ export default function GuruPanel({
   const [aiTopic, setAiTopic] = useState('Sistem Ekskresi dan Nefron Ginjal Manusia');
   const [aiCount, setAiCount] = useState(5);
   const [aiDifficulty, setAiDifficulty] = useState('Sedang');
-  const [aiTypes, setAiTypes] = useState<QuestionType[]>([
-    'pilihan_ganda',
-    'pilihan_ganda_kompleks',
-    'isian',
-    'essay',
-    'menjodohkan',
-    'benar_salah',
-  ]);
+  const [aiTypePreset, setAiTypePreset] = useState<string>('pilihan_ganda');
+  const [aiTypes, setAiTypes] = useState<QuestionType[]>(['pilihan_ganda']);
   const [isAiGenerating, setIsAiGenerating] = useState(false);
   const [aiErrorMessage, setAiErrorMessage] = useState('');
+
+  const handleAiTypePresetChange = (preset: string) => {
+    setAiTypePreset(preset);
+    if (preset === 'campuran') {
+      setAiTypes([
+        'pilihan_ganda',
+        'pilihan_ganda_kompleks',
+        'isian',
+        'essay',
+        'menjodohkan',
+        'benar_salah',
+      ]);
+    } else if (preset === 'kustom') {
+      if (aiTypes.length === 0) {
+        setAiTypes(['pilihan_ganda']);
+      }
+    } else {
+      setAiTypes([preset as QuestionType]);
+    }
+  };
+
+  const handleToggleCustomType = (type: QuestionType) => {
+    if (aiTypes.includes(type)) {
+      if (aiTypes.length > 1) {
+        setAiTypes(aiTypes.filter((t) => t !== type));
+      }
+    } else {
+      setAiTypes([...aiTypes, type]);
+    }
+  };
 
   // Manual Question Creator Modal
   const [isManualQuestionModalOpen, setIsManualQuestionModalOpen] = useState(false);
@@ -154,6 +181,9 @@ export default function GuruPanel({
     { statement: '', answer: 'Benar' },
     { statement: '', answer: 'Salah' },
   ]);
+  const [newQuestionFillInTheBlanks, setNewQuestionFillInTheBlanks] = useState<string[]>(['']);
+  const [newQuestionJumbledWords, setNewQuestionJumbledWords] = useState<string[]>([]);
+  const [newQuestionCorrectOrder, setNewQuestionCorrectOrder] = useState<string[]>([]);
   const [newQuestionExplanation, setNewQuestionExplanation] = useState('');
 
   // Create Exam Modal
@@ -206,6 +236,7 @@ export default function GuruPanel({
   const [isEditQuestionModalOpen, setIsEditQuestionModalOpen] = useState(false);
   const [editingQuestion, setEditingQuestion] = useState<Question | null>(null);
   const [editQuestionForm, setEditQuestionForm] = useState({
+    type: 'pilihan_ganda' as QuestionType,
     prompt: '',
     points: 10,
     correctAnswer: '',
@@ -256,9 +287,9 @@ export default function GuruPanel({
     setTimeout(() => setSuccessMessage(''), 4500);
   };
 
-  const selectedExam = exams.find((e) => e.id === selectedExamId) || exams[0];
-  const examAttempts = attempts.filter((a) => a.examId === selectedExam?.id);
-  const uniqueRekapClasses = Array.from(new Set(examAttempts.map((a) => a.studentClass))).sort();
+  const selectedExam = exams.find((e) => e.id === (selectedExamId || riwayatSelectedExamId)) || exams[0];
+  const examAttempts = attempts.filter((a) => a.examId === selectedExam?.id && a.status === 'submitted');
+  const uniqueRekapClasses = Array.from(new Set(examAttempts.map((a) => a.studentClass).filter(Boolean))).sort();
   const filteredRekapAttempts = examAttempts.filter((a) => rekapClassFilter === 'Semua Kelas' || a.studentClass === rekapClassFilter);
 
   const calculateQuestionScore = (q: Question, studentAns: any): number => {
@@ -366,10 +397,10 @@ export default function GuruPanel({
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           subject: aiSubject,
-          gradeLevel: '7A, 7B',
+          gradeLevel: selectedExam?.targetClasses?.length ? `SMP Kelas ${selectedExam.targetClasses.join(', ')}` : 'SMP Kelas 8',
           topic: aiTopic,
           count: aiCount,
-          questionTypes: aiTypes,
+          questionTypes: aiTypes.length > 0 ? aiTypes : ['pilihan_ganda'],
           difficulty: aiDifficulty,
         }),
       });
@@ -383,13 +414,36 @@ export default function GuruPanel({
 
       // Append to selected exam questions
       if (selectedExam) {
+        const existingIds = new Set(selectedExam.questions.map((q) => q.id));
+        const sanitizedGenerated = generated.map((g, gIdx) => {
+          let finalId = g.id;
+          if (!finalId || existingIds.has(finalId)) {
+            finalId = `q_ai_${Date.now()}_${gIdx + 1}_${Math.random().toString(36).substring(2, 6)}`;
+          }
+          existingIds.add(finalId);
+          return { ...g, id: finalId };
+        });
+
         const updatedExams = exams.map((ex) =>
           ex.id === selectedExam.id
-            ? { ...ex, questions: [...ex.questions, ...generated] }
+            ? { ...ex, questions: [...ex.questions, ...sanitizedGenerated] }
             : ex
         );
         onUpdateExams(updatedExams);
-        showSuccess(`Berhasil membuat ${generated.length} butir soal variatif otomatis dengan AI!`);
+        const typeDescription = aiTypePreset === 'pilihan_ganda'
+          ? 'Pilihan Ganda'
+          : aiTypePreset === 'essay'
+          ? 'Uraian / Essay'
+          : aiTypePreset === 'pilihan_ganda_kompleks'
+          ? 'PG Kompleks'
+          : aiTypePreset === 'menjodohkan'
+          ? 'Menjodohkan'
+          : aiTypePreset === 'benar_salah'
+          ? 'Benar/Salah'
+          : aiTypePreset === 'isian'
+          ? 'Isian Singkat'
+          : 'variatif';
+        showSuccess(`Berhasil membuat ${sanitizedGenerated.length} butir soal ${typeDescription} otomatis dengan AI!`);
         setIsAiModalOpen(false);
       }
     } catch (err: any) {
@@ -412,13 +466,22 @@ export default function GuruPanel({
         alert('File Excel tidak memiliki baris soal yang valid.');
         return;
       }
+      const existingIds = new Set(selectedExam.questions.map((q) => q.id));
+      const sanitizedParsed = parsed.map((p, pIdx) => {
+        let finalId = p.id;
+        if (!finalId || existingIds.has(finalId)) {
+          finalId = `q_imp_${Date.now()}_${pIdx + 1}_${Math.random().toString(36).substring(2, 6)}`;
+        }
+        existingIds.add(finalId);
+        return { ...p, id: finalId };
+      });
       const updatedExams = exams.map((ex) =>
         ex.id === selectedExam.id
-          ? { ...ex, questions: [...ex.questions, ...parsed] }
+          ? { ...ex, questions: [...ex.questions, ...sanitizedParsed] }
           : ex
       );
       onUpdateExams(updatedExams);
-      showSuccess(`Berhasil mengimpor ${parsed.length} butir soal dari Excel (.xlsx)!`);
+      showSuccess(`Berhasil mengimpor ${sanitizedParsed.length} butir soal dari Excel (.xlsx)!`);
     } catch (err: any) {
       alert('Gagal membaca Excel: ' + (err?.message || 'Format tidak sesuai'));
     }
@@ -436,13 +499,22 @@ export default function GuruPanel({
         alert('Tidak dapat mengekstrak soal dari file ini. Pastikan format teks memuat nomor soal (1. 2. dll).');
         return;
       }
+      const existingIds = new Set(selectedExam.questions.map((q) => q.id));
+      const sanitizedParsed = parsed.map((p, pIdx) => {
+        let finalId = p.id;
+        if (!finalId || existingIds.has(finalId)) {
+          finalId = `q_doc_${Date.now()}_${pIdx + 1}_${Math.random().toString(36).substring(2, 6)}`;
+        }
+        existingIds.add(finalId);
+        return { ...p, id: finalId };
+      });
       const updatedExams = exams.map((ex) =>
         ex.id === selectedExam.id
-          ? { ...ex, questions: [...ex.questions, ...parsed] }
+          ? { ...ex, questions: [...ex.questions, ...sanitizedParsed] }
           : ex
       );
       onUpdateExams(updatedExams);
-      showSuccess(`Berhasil membaca ${parsed.length} soal dari dokumen "${file.name}"!`);
+      showSuccess(`Berhasil membaca ${sanitizedParsed.length} soal dari dokumen "${file.name}"!`);
     } catch (err: any) {
       alert('Gagal memproses dokumen: ' + (err?.message || 'Error'));
     }
@@ -652,13 +724,36 @@ export default function GuruPanel({
 
   // Open Edit Question Modal
   const handleOpenEditQuestion = (q: Question) => {
-    setEditingQuestion(q);
+    // Robust question type normalization
+    let normalizedType: QuestionType = q.type;
+    const rawT = String(q.type || '').toLowerCase().trim();
+    if (rawT.includes('kompleks') || rawT.includes('multiple_choice') || rawT === 'pg_kompleks') {
+      normalizedType = 'pilihan_ganda_kompleks';
+    } else if (rawT.includes('isi') || rawT.includes('short') || rawT === 'fill_in') {
+      normalizedType = 'isian';
+    } else if (rawT.includes('uraian') || rawT.includes('essay')) {
+      normalizedType = 'essay';
+    } else if (rawT.includes('jodoh') || rawT.includes('matching') || rawT === 'match') {
+      normalizedType = 'menjodohkan';
+    } else if (rawT.includes('benar') || rawT.includes('salah') || rawT.includes('true_false') || rawT === 'tf') {
+      normalizedType = 'benar_salah';
+    } else if (rawT.includes('pilihan') || rawT.includes('ganda') || rawT === 'single_choice') {
+      normalizedType = 'pilihan_ganda';
+    }
+
+    const safeOptions =
+      q.options && q.options.length > 0
+        ? [...q.options]
+        : ['A. Pilihan A', 'B. Pilihan B', 'C. Pilihan C', 'D. Pilihan D'];
+
+    setEditingQuestion({ ...q, type: normalizedType });
     setEditQuestionForm({
+      type: normalizedType,
       prompt: q.prompt,
       points: q.points || 10,
       correctAnswer: q.correctAnswer || '',
       correctAnswers: q.correctAnswers || (q.correctAnswer ? [q.correctAnswer] : []),
-      options: q.options && q.options.length > 0 ? [...q.options] : ['A. ', 'B. ', 'C. ', 'D. '],
+      options: safeOptions,
       matchingPairs:
         q.matchingPairs && q.matchingPairs.length > 0
           ? q.matchingPairs.map((p) => ({ ...p }))
@@ -687,35 +782,69 @@ export default function GuruPanel({
     setIsSavingEditQuestion(true);
     await new Promise((r) => setTimeout(r, 350));
 
+    const targetType = editQuestionForm.type || editingQuestion.type;
+
     const updatedQuestions = selectedExam.questions.map((q) => {
       if (q.id === editingQuestion.id) {
-        let finalOptions = q.options ? editQuestionForm.options.filter((opt) => opt.trim().length > 0) : undefined;
-        let finalCorrectAnswer = editQuestionForm.correctAnswer;
-        let finalCorrectAnswers = editQuestionForm.correctAnswers;
-        let finalMatchingPairs = q.matchingPairs;
-        let finalTrueFalse = q.trueFalseStatements;
+        let finalOptions: string[] | undefined = undefined;
+        let finalCorrectAnswer: string | undefined = undefined;
+        let finalCorrectAnswers: string[] | undefined = undefined;
+        let finalMatchingPairs = undefined;
+        let finalTrueFalse = undefined;
+        let finalEssayRubric = undefined;
 
-        if (q.type === 'pilihan_ganda_kompleks') {
+        if (targetType === 'pilihan_ganda') {
           finalOptions = editQuestionForm.options.filter((opt) => opt.trim().length > 0);
-          finalCorrectAnswers = editQuestionForm.correctAnswers.length > 0 ? editQuestionForm.correctAnswers : [editQuestionForm.options[0]];
+          finalCorrectAnswer = editQuestionForm.correctAnswer || finalOptions[0] || '';
+        } else if (targetType === 'pilihan_ganda_kompleks') {
+          finalOptions = editQuestionForm.options.filter((opt) => opt.trim().length > 0);
+          finalCorrectAnswers =
+            editQuestionForm.correctAnswers.length > 0
+              ? editQuestionForm.correctAnswers
+              : [finalOptions[0] || ''];
           finalCorrectAnswer = finalCorrectAnswers[0];
-        } else if (q.type === 'menjodohkan') {
-          finalMatchingPairs = editQuestionForm.matchingPairs.filter((p) => p.premise.trim() && p.match.trim());
-        } else if (q.type === 'benar_salah') {
+        } else if (targetType === 'isian') {
+          // CRITICAL: isian questions MUST NOT have options or multiple-choice structures!
+          finalOptions = undefined;
+          finalCorrectAnswers = undefined;
+          finalMatchingPairs = undefined;
+          finalTrueFalse = undefined;
+          finalCorrectAnswer = editQuestionForm.correctAnswer.trim();
+        } else if (targetType === 'essay') {
+          finalOptions = undefined;
+          finalCorrectAnswers = undefined;
+          finalMatchingPairs = undefined;
+          finalTrueFalse = undefined;
+          finalCorrectAnswer = editQuestionForm.correctAnswer.trim() || undefined;
+          finalEssayRubric = editQuestionForm.essayRubric.trim() || undefined;
+        } else if (targetType === 'menjodohkan') {
+          finalOptions = undefined;
+          finalCorrectAnswer = undefined;
+          finalCorrectAnswers = undefined;
+          finalTrueFalse = undefined;
+          finalMatchingPairs = editQuestionForm.matchingPairs.filter(
+            (p) => p.premise.trim() && p.match.trim()
+          );
+        } else if (targetType === 'benar_salah') {
+          finalOptions = undefined;
+          finalCorrectAnswer = undefined;
+          finalCorrectAnswers = undefined;
+          finalMatchingPairs = undefined;
           finalTrueFalse = editQuestionForm.trueFalseStatements.filter((s) => s.statement.trim());
         }
 
         return {
           ...q,
+          type: targetType,
           prompt: editQuestionForm.prompt,
-          points: Number(editQuestionForm.points),
+          points: Number(editQuestionForm.points) || 10,
           correctAnswer: finalCorrectAnswer,
           correctAnswers: finalCorrectAnswers,
           options: finalOptions,
           matchingPairs: finalMatchingPairs,
           trueFalseStatements: finalTrueFalse,
           explanation: editQuestionForm.explanation.trim() || undefined,
-          essayRubric: editQuestionForm.essayRubric.trim() || undefined,
+          essayRubric: finalEssayRubric,
         };
       }
       return q;
@@ -939,7 +1068,7 @@ export default function GuruPanel({
               {isSidebarOpen && <span className="truncate">Bank Soal</span>}
             </button>
 
-            {/* Menu Live Monitor & Anti-Curang */}
+            {/* Menu Live Monitor */}
             <button
               id="menu-sidebar-guru-monitoring"
               onClick={() => {
@@ -954,25 +1083,25 @@ export default function GuruPanel({
               title="Live Monitor & Anti-Curang"
             >
               <ShieldAlert className={`w-5 h-5 shrink-0 ${activeTab === 'monitoring' ? 'text-slate-900' : 'text-slate-400'}`} />
-              {isSidebarOpen && <span className="truncate">Live Monitoring</span>}
+              {isSidebarOpen && <span className="truncate">Live Monitor</span>}
             </button>
 
-            {/* Menu Laporan & Rekap Nilai */}
+            {/* Menu Riwayat Siswa */}
             <button
-              id="menu-sidebar-guru-rekap"
+              id="menu-sidebar-guru-riwayat"
               onClick={() => {
-                setActiveTab('rekap');
+                setActiveTab('riwayat_siswa');
                 if (window.innerWidth < 1024) setIsSidebarOpen(false);
               }}
               className={`w-full flex items-center gap-3 px-3 py-2.5 rounded-xl transition cursor-pointer ${
-                activeTab === 'rekap'
+                activeTab === 'riwayat_siswa'
                   ? 'bg-white text-slate-900 font-extrabold shadow-sm'
                   : 'text-slate-300 hover:bg-slate-800/80 hover:text-white font-medium'
               }`}
-              title="Laporan & Rekap Nilai"
+              title="Riwayat Ujian Siswa"
             >
-              <Award className={`w-5 h-5 shrink-0 ${activeTab === 'rekap' ? 'text-slate-900' : 'text-slate-400'}`} />
-              {isSidebarOpen && <span className="truncate">Rekap & Laporan</span>}
+              <History className={`w-5 h-5 shrink-0 ${activeTab === 'riwayat_siswa' ? 'text-slate-900' : 'text-slate-400'}`} />
+              {isSidebarOpen && <span className="truncate">Riwayat Ujian Siswa</span>}
             </button>
 
             {/* Menu Evaluasi Soal */}
@@ -993,22 +1122,22 @@ export default function GuruPanel({
               {isSidebarOpen && <span className="truncate">Evaluasi Soal</span>}
             </button>
 
-            {/* Menu Riwayat Siswa */}
+            {/* Menu Rekap & Laporan */}
             <button
-              id="menu-sidebar-guru-riwayat"
+              id="menu-sidebar-guru-rekap"
               onClick={() => {
-                setActiveTab('riwayat_siswa');
+                setActiveTab('rekap');
                 if (window.innerWidth < 1024) setIsSidebarOpen(false);
               }}
               className={`w-full flex items-center gap-3 px-3 py-2.5 rounded-xl transition cursor-pointer ${
-                activeTab === 'riwayat_siswa'
+                activeTab === 'rekap'
                   ? 'bg-white text-slate-900 font-extrabold shadow-sm'
                   : 'text-slate-300 hover:bg-slate-800/80 hover:text-white font-medium'
               }`}
-              title="Riwayat Ujian Siswa"
+              title="Rekap & Laporan Nilai"
             >
-              <History className={`w-5 h-5 shrink-0 ${activeTab === 'riwayat_siswa' ? 'text-slate-900' : 'text-slate-400'}`} />
-              {isSidebarOpen && <span className="truncate">Riwayat Ujian Siswa</span>}
+              <Award className={`w-5 h-5 shrink-0 ${activeTab === 'rekap' ? 'text-slate-900' : 'text-slate-400'}`} />
+              {isSidebarOpen && <span className="truncate">Rekap & Laporan</span>}
             </button>
           </nav>
         </div>
@@ -1052,9 +1181,6 @@ export default function GuruPanel({
                 </div>
                 <div className="text-xs font-bold text-slate-800 leading-tight truncate">
                   {currentUser.name}
-                </div>
-                <div className="text-[10px] text-slate-600 truncate mt-0.5">
-                  {currentUser.subjectName || 'Guru Pengampu'}
                 </div>
               </div>
             </div>
@@ -1296,9 +1422,6 @@ export default function GuruPanel({
                                 }`}>
                                   {exam.status === 'active' ? 'Aktif' : 'Arsip'}
                                 </span>
-                                <span className="text-[10px] font-mono font-bold text-slate-500 bg-slate-100 px-1.5 py-0.5 rounded">
-                                  Token: {exam.token}
-                                </span>
                               </div>
                               <h4 className="text-sm font-bold text-slate-900 truncate">
                                 {exam.title}
@@ -1370,7 +1493,7 @@ export default function GuruPanel({
                     <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 text-xs text-slate-300">
                       <div className="p-3 rounded-xl bg-slate-800/80 border border-slate-700/60">
                         <span className="font-bold text-white block mb-0.5">1. Jadwalkan Ujian</span>
-                        Atur durasi pengerjaan, KKM, kelas sasaran, serta token aktivasi pada menu <strong>Jadwal Ujian</strong>.
+                        Atur durasi pengerjaan, KKM, serta kelas sasaran pada menu <strong>Jadwal Ujian</strong>.
                       </div>
                       <div className="p-3 rounded-xl bg-slate-800/80 border border-slate-700/60">
                         <span className="font-bold text-white block mb-0.5">2. Susun Bank Soal</span>
@@ -1575,7 +1698,7 @@ export default function GuruPanel({
                 </h2>
               </div>
               <p className="text-xs text-slate-500 mt-1">
-                Kelola jadwal pelaksanaan asesmen, token akses, durasi pengerjaan, KKM, dan status rilis nilai.
+                Kelola jadwal pelaksanaan asesmen, durasi pengerjaan, KKM, dan status rilis nilai.
               </p>
             </div>
 
@@ -1899,7 +2022,7 @@ export default function GuruPanel({
 
                           <div className="text-[11px] text-slate-500 space-y-0.5 mb-3">
                             <p className="truncate">Kelas: <strong className="text-slate-700">{pkg.targetClasses.join(', ')}</strong></p>
-                            <p>Waktu: <strong className="text-slate-700">{pkg.durationMinutes} menit</strong> • Token: <code className="font-mono text-indigo-600 bg-white px-1 py-0.2 rounded border border-slate-200">{pkg.token}</code></p>
+                            <p>Waktu: <strong className="text-slate-700">{pkg.durationMinutes} menit</strong></p>
                           </div>
                         </div>
 
@@ -2119,7 +2242,7 @@ export default function GuruPanel({
                   <div className="space-y-4">
                     {filteredQuestions.map((q, idx) => (
                       <div
-                        key={q.id}
+                        key={`${q.id}_${idx}`}
                         className="bg-white rounded-2xl border border-slate-200 p-5 shadow-2xs hover:shadow-xs transition"
                       >
                         <div className="flex items-start justify-between gap-4 mb-3">
@@ -2127,8 +2250,30 @@ export default function GuruPanel({
                             <span className="w-7 h-7 rounded-lg bg-indigo-600 text-white font-extrabold flex items-center justify-center text-xs">
                               {idx + 1}
                             </span>
-                            <span className="px-2.5 py-0.5 rounded-full text-[11px] font-bold uppercase bg-slate-100 text-slate-700">
-                              {q.type.replace(/_/g, ' ')}
+                            <span className={`px-2.5 py-0.5 rounded-full text-[11px] font-bold uppercase ${
+                              q.type === 'isian'
+                                ? 'bg-emerald-100 text-emerald-800'
+                                : q.type === 'pilihan_ganda'
+                                ? 'bg-blue-100 text-blue-800'
+                                : q.type === 'pilihan_ganda_kompleks'
+                                ? 'bg-indigo-100 text-indigo-800'
+                                : q.type === 'essay'
+                                ? 'bg-purple-100 text-purple-800'
+                                : q.type === 'menjodohkan'
+                                ? 'bg-amber-100 text-amber-800'
+                                : q.type === 'benar_salah'
+                                ? 'bg-rose-100 text-rose-800'
+                                : 'bg-slate-100 text-slate-700'
+                            }`}>
+                              {q.type === 'isian'
+                                ? 'Isian Singkat'
+                                : q.type === 'pilihan_ganda'
+                                ? 'Pilihan Ganda'
+                                : q.type === 'pilihan_ganda_kompleks'
+                                ? 'PG Kompleks'
+                                : q.type === 'essay'
+                                ? 'Uraian / Essay'
+                                : q.type.replace(/_/g, ' ')}
                             </span>
                             <span className="px-2.5 py-0.5 rounded-full text-[11px] font-semibold bg-amber-50 text-amber-700 border border-amber-200">
                               Bobot: {q.points} Poin
@@ -2183,7 +2328,7 @@ export default function GuruPanel({
                         )}
 
                         {/* Question details based on type */}
-                        {q.options && q.options.length > 0 && (
+                        {(q.type === 'pilihan_ganda' || q.type === 'pilihan_ganda_kompleks') && q.options && q.options.length > 0 && (
                           <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 mb-3">
                             {q.options.map((opt, optI) => {
                               const isAnswer =
@@ -2414,7 +2559,44 @@ export default function GuruPanel({
       )}
 
       {/* TAB 4: REKAPITULASI & LAPORAN NILAI */}
-      {activeTab === 'rekap' && (
+      {activeTab === 'rekap' && (() => {
+        // Group submitted attempts by student for 1-to-1 sync with Riwayat Ujian Siswa
+        const rekapStudentGroups: Record<string, {
+          studentId: string;
+          studentName: string;
+          studentNisn: string;
+          studentClass: string;
+          bestScore: number;
+          totalAttempts: number;
+          passedKkm: boolean;
+          attempt: ExamAttempt;
+        }> = {};
+
+        filteredRekapAttempts.forEach(att => {
+          if (!rekapStudentGroups[att.studentId]) {
+            rekapStudentGroups[att.studentId] = {
+              studentId: att.studentId,
+              studentName: att.studentName,
+              studentNisn: att.studentNisn,
+              studentClass: att.studentClass,
+              bestScore: att.scorePercentage,
+              totalAttempts: 1,
+              passedKkm: att.scorePercentage >= (selectedExam?.kkm || 75),
+              attempt: att
+            };
+          } else {
+            rekapStudentGroups[att.studentId].totalAttempts += 1;
+            if (att.scorePercentage > rekapStudentGroups[att.studentId].bestScore) {
+              rekapStudentGroups[att.studentId].bestScore = att.scorePercentage;
+              rekapStudentGroups[att.studentId].passedKkm = att.scorePercentage >= (selectedExam?.kkm || 75);
+              rekapStudentGroups[att.studentId].attempt = att;
+            }
+          }
+        });
+
+        const rekapStudentList = Object.values(rekapStudentGroups);
+
+        return (
         <div className="space-y-4">
           <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-3 bg-white p-4 rounded-2xl border border-slate-200 shadow-2xs">
             <div>
@@ -2428,8 +2610,24 @@ export default function GuruPanel({
 
             <div className="flex items-center gap-2 overflow-x-auto pb-1 md:pb-0 hide-scrollbar max-w-full">
               <select
+                value={selectedExam?.id || ''}
+                onChange={(e) => {
+                  setSelectedExamId(e.target.value);
+                  setRiwayatSelectedExamId(e.target.value);
+                }}
+                className="px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-xs font-bold text-slate-700 focus:outline-none focus:ring-2 focus:ring-indigo-500 cursor-pointer min-w-[170px]"
+              >
+                {exams.map(ex => (
+                  <option key={ex.id} value={ex.id}>{ex.title}</option>
+                ))}
+              </select>
+
+              <select
                 value={rekapClassFilter}
-                onChange={(e) => setRekapClassFilter(e.target.value)}
+                onChange={(e) => {
+                  setRekapClassFilter(e.target.value);
+                  setRiwayatSelectedClass(e.target.value);
+                }}
                 className="px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-xs font-bold text-slate-700 focus:outline-none focus:ring-2 focus:ring-indigo-500 cursor-pointer"
               >
                 <option value="Semua Kelas">Semua Kelas</option>
@@ -2447,7 +2645,7 @@ export default function GuruPanel({
                     filteredRekapAttempts
                   )
                 }
-                className="px-3.5 py-2 bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl text-xs font-bold flex items-center gap-1.5 transition cursor-pointer shadow-xs"
+                className="px-3.5 py-2 bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl text-xs font-bold flex items-center gap-1.5 transition cursor-pointer shadow-xs whitespace-nowrap"
               >
                 <FileSpreadsheet className="w-4 h-4" />
                 <span>Unduh Rekap Excel (.xlsx)</span>
@@ -2456,7 +2654,7 @@ export default function GuruPanel({
               <button
                 id="btn-print-exam-rekap"
                 onClick={() => setIsPrintRekapModalOpen(true)}
-                className="px-3.5 py-2 bg-slate-800 hover:bg-slate-900 text-white rounded-xl text-xs font-bold flex items-center gap-1.5 transition cursor-pointer shadow-xs"
+                className="px-3.5 py-2 bg-slate-800 hover:bg-slate-900 text-white rounded-xl text-xs font-bold flex items-center gap-1.5 transition cursor-pointer shadow-xs whitespace-nowrap"
               >
                 <Printer className="w-4 h-4" />
                 <span>Print Rekap Nilai</span>
@@ -2475,45 +2673,49 @@ export default function GuruPanel({
                     <th className="py-3 px-4 text-center">Kelas</th>
                     <th className="py-3 px-4 text-center">KKM</th>
                     <th className="py-3 px-4 text-center">Nilai Akhir</th>
+                    <th className="py-3 px-4 text-center">Percobaan</th>
                     <th className="py-3 px-4 text-center">Keterangan</th>
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-slate-100">
-                  {filteredRekapAttempts.length === 0 ? (
+                  {rekapStudentList.length === 0 ? (
                     <tr>
-                      <td colSpan={7} className="text-center py-10 text-slate-400">
+                      <td colSpan={8} className="text-center py-10 text-slate-400">
                         Belum ada laporan nilai untuk ujian ini.
                       </td>
                     </tr>
                   ) : (
-                    filteredRekapAttempts.map((att, idx) => {
-                      const isPassed = att.scorePercentage >= (selectedExam?.kkm || 75);
-
+                    rekapStudentList.map((st, idx) => {
                       return (
-                        <tr key={att.id} className="hover:bg-slate-50 transition">
+                        <tr key={st.studentId} className="hover:bg-slate-50 transition">
                           <td className="py-3 px-4 text-center font-bold text-slate-500">{idx + 1}</td>
                           <td className="py-3 px-4 font-mono text-slate-700 font-semibold">
-                            {att.studentNisn}
+                            {st.studentNisn}
                           </td>
-                          <td className="py-3 px-4 font-bold text-slate-900">{att.studentName}</td>
+                          <td className="py-3 px-4 font-bold text-slate-900">{st.studentName}</td>
                           <td className="py-3 px-4 text-center font-bold text-indigo-700">
-                            {att.studentClass}
+                            {st.studentClass}
                           </td>
                           <td className="py-3 px-4 text-center font-semibold text-slate-500">
                             {selectedExam?.kkm || 75}
                           </td>
                           <td className="py-3 px-4 text-center font-extrabold text-base text-slate-900">
-                            {att.scorePercentage}
+                            {st.bestScore}
+                          </td>
+                          <td className="py-3 px-4 text-center">
+                            <span className={`px-2 py-0.5 rounded-full text-[10px] font-bold ${st.totalAttempts > 1 ? 'bg-amber-100 text-amber-800' : 'bg-slate-100 text-slate-600'}`}>
+                              {st.totalAttempts > 1 ? `${st.totalAttempts}x (Remedial)` : '1x'}
+                            </span>
                           </td>
                           <td className="py-3 px-4 text-center">
                             <span
                               className={`px-2.5 py-0.5 rounded-full font-bold text-[10px] ${
-                                isPassed
+                                st.passedKkm
                                   ? 'bg-emerald-100 text-emerald-800'
                                   : 'bg-rose-100 text-rose-800'
                               }`}
                             >
-                              {isPassed ? 'TUNTAS' : 'REMEDIAL'}
+                              {st.passedKkm ? 'TUNTAS' : 'REMEDIAL'}
                             </span>
                           </td>
                         </tr>
@@ -2525,23 +2727,33 @@ export default function GuruPanel({
             </div>
           </div>
         </div>
-      )}
+        );
+      })()}
 
       {/* TAB 6: RIWAYAT & REMEDIAL SISWA */}
       {activeTab === 'riwayat_siswa' && (() => {
-        // Find unique classes for dropdowns across all attempts
-        const uniqueClasses = Array.from(new Set(attempts.map(a => a.studentClass).filter(Boolean))).sort();
+        const activeExamId = riwayatSelectedExamId || selectedExamId || exams[0]?.id || '';
+        const activeExam = exams.find(e => e.id === activeExamId) || exams[0];
+        const activeClass = riwayatSelectedClass || 'Semua Kelas';
+
+        // Find submitted attempts for this exam
+        const examSubmittedAttempts = attempts.filter(a => a.status === 'submitted' && a.examId === activeExamId);
+        const uniqueClasses = Array.from(new Set(examSubmittedAttempts.map(a => a.studentClass).filter(Boolean))).sort();
 
         // If exam and class are selected, filter attempts for these
-        const filteredAttempts = attempts.filter(a =>
-          a.status === 'submitted' &&
-          a.examId === riwayatSelectedExamId &&
-          a.studentClass === riwayatSelectedClass
+        const filteredAttempts = examSubmittedAttempts.filter(a =>
+          activeClass === 'Semua Kelas' || a.studentClass === activeClass
         ).sort((a,b) => new Date(a.startedAt).getTime() - new Date(b.startedAt).getTime());
 
         // Group by student
         const studentRiwayat = [];
-        const studentGroups = {};
+        const studentGroups: Record<string, {
+          studentId: string;
+          studentName: string;
+          studentNisn: string;
+          studentClass: string;
+          attempts: ExamAttempt[];
+        }> = {};
 
         filteredAttempts.forEach(a => {
           if (!studentGroups[a.studentId]) {
@@ -2564,7 +2776,7 @@ export default function GuruPanel({
             ...group,
             totalAttempts: group.attempts.length,
             bestScore,
-            passedKkm: latestAttempt.passedKkm
+            passedKkm: latestAttempt.passedKkm || bestScore >= (activeExam?.kkm || 75)
           });
         }
         
@@ -2578,8 +2790,22 @@ export default function GuruPanel({
         <div className="space-y-4">
           <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-3 bg-white p-4 rounded-2xl border border-slate-200 shadow-2xs">
             <div>
-              <h2 className="text-base font-extrabold text-slate-900">Riwayat Ujian & Remedial</h2>
-              <p className="text-xs text-slate-500">Pilih ujian dan kelas untuk melihat daftar riwayat dan remedial siswa.</p>
+              <h2 className="text-base font-extrabold text-slate-900">Riwayat Ujian & Remedial Siswa</h2>
+              <p className="text-xs text-slate-500">
+                Ujian: <strong className="text-indigo-600">{activeExam?.title}</strong> • KKM: <strong>{activeExam?.kkm || 75}</strong>
+              </p>
+            </div>
+            <div className="flex items-center gap-2">
+              <button
+                id="btn-hapus-semua-riwayat"
+                onClick={() => setIsDeleteAllRiwayatModalOpen(true)}
+                disabled={filteredAttempts.length === 0}
+                className="px-3.5 py-2 bg-rose-600 hover:bg-rose-700 text-white rounded-xl text-xs font-bold flex items-center gap-1.5 transition cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed shadow-xs"
+                title="Hapus seluruh riwayat ujian siswa"
+              >
+                <Trash2 className="w-4 h-4" />
+                <span>Hapus Semua Riwayat</span>
+              </button>
             </div>
           </div>
 
@@ -2587,127 +2813,144 @@ export default function GuruPanel({
             <div className="p-4 sm:p-5 border-b border-slate-200 bg-slate-50/50 flex flex-col sm:flex-row gap-4 sm:items-center justify-between">
               <div className="flex flex-col sm:flex-row gap-3 w-full sm:w-auto">
                  <select
-                   value={riwayatSelectedExamId}
-                   onChange={(e) => setRiwayatSelectedExamId(e.target.value)}
+                   value={activeExamId}
+                   onChange={(e) => {
+                     setRiwayatSelectedExamId(e.target.value);
+                     setSelectedExamId(e.target.value);
+                   }}
                    className="px-3 py-2 bg-white border border-slate-300 rounded-xl text-sm focus:ring-2 focus:ring-indigo-500 transition shadow-xs cursor-pointer min-w-[200px]"
                  >
-                   <option value="">-- Pilih Ujian --</option>
                    {exams.map(ex => (
                      <option key={ex.id} value={ex.id}>{ex.title}</option>
                    ))}
                  </select>
 
                  <select
-                   value={riwayatSelectedClass}
-                   onChange={(e) => setRiwayatSelectedClass(e.target.value)}
+                   value={activeClass}
+                   onChange={(e) => {
+                     setRiwayatSelectedClass(e.target.value);
+                     setRekapClassFilter(e.target.value);
+                   }}
                    className="px-3 py-2 bg-white border border-slate-300 rounded-xl text-sm focus:ring-2 focus:ring-indigo-500 transition shadow-xs cursor-pointer min-w-[150px]"
                  >
-                   <option value="">-- Pilih Kelas --</option>
+                   <option value="Semua Kelas">Semua Kelas</option>
                    {uniqueClasses.map(cls => (
-                     <option key={cls} value={cls}>{cls}</option>
+                     <option key={cls} value={cls}>Kelas {cls}</option>
                    ))}
                  </select>
               </div>
 
-              {riwayatSelectedExamId && riwayatSelectedClass && (
-                <div className="relative max-w-sm w-full sm:w-auto">
-                  <Search className="w-4 h-4 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2" />
-                  <input
-                    type="text"
-                    placeholder="Cari Nama / NISN..."
-                    value={searchAttemptQuery}
-                    onChange={(e) => setSearchAttemptQuery(e.target.value)}
-                    className="w-full pl-9 pr-4 py-2 bg-white border border-slate-300 rounded-xl text-sm focus:ring-2 focus:ring-indigo-500 transition shadow-xs"
-                  />
-                </div>
-              )}
+              <div className="relative max-w-sm w-full sm:w-auto">
+                <Search className="w-4 h-4 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2" />
+                <input
+                  type="text"
+                  placeholder="Cari Nama / NISN..."
+                  value={searchAttemptQuery}
+                  onChange={(e) => setSearchAttemptQuery(e.target.value)}
+                  className="w-full pl-9 pr-4 py-2 bg-white border border-slate-300 rounded-xl text-sm focus:ring-2 focus:ring-indigo-500 transition shadow-xs"
+                />
+              </div>
             </div>
 
             <div className="overflow-x-auto min-h-[300px]">
-              {(!riwayatSelectedExamId || !riwayatSelectedClass) ? (
-                <div className="flex flex-col items-center justify-center py-16 px-4 text-center">
-                  <div className="w-16 h-16 bg-indigo-50 rounded-full flex items-center justify-center mb-4 text-indigo-400">
-                    <FileSpreadsheet className="w-8 h-8" />
-                  </div>
-                  <h3 className="text-slate-900 font-bold mb-1">Pilih Filter Ujian dan Kelas</h3>
-                  <p className="text-slate-500 text-sm max-w-sm">
-                    Untuk melihat daftar riwayat siswa dan aksi melihat percobaan atau menghapus, silakan pilih Ujian dan Kelas di atas terlebih dahulu.
-                  </p>
-                </div>
-              ) : (
-                <table className="w-full text-left text-sm whitespace-nowrap">
-                  <thead className="bg-white border-b border-slate-200 text-slate-500 text-[11px] uppercase font-extrabold tracking-wider">
+              <table className="w-full text-left text-sm whitespace-nowrap">
+                <thead className="bg-white border-b border-slate-200 text-slate-500 text-[11px] uppercase font-extrabold tracking-wider">
+                  <tr>
+                    <th className="py-3.5 px-5">Siswa</th>
+                    <th className="py-3.5 px-5 text-center">Kelas</th>
+                    <th className="py-3.5 px-5 text-center">Jumlah Percobaan</th>
+                    <th className="py-3.5 px-5 text-center">Nilai Tertinggi</th>
+                    <th className="py-3.5 px-5 text-center">Status Akhir</th>
+                    <th className="py-3.5 px-5 text-center">Aksi</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-slate-100 text-slate-700">
+                  <AnimatePresence mode="popLayout" initial={false}>
+                  {finalStudentList.length === 0 ? (
                     <tr>
-                      <th className="py-3.5 px-5">Siswa</th>
-                      <th className="py-3.5 px-5 text-center">Jumlah Percobaan</th>
-                      <th className="py-3.5 px-5 text-center">Nilai Tertinggi</th>
-                      <th className="py-3.5 px-5 text-center">Status Akhir</th>
-                      <th className="py-3.5 px-5 text-center">Aksi</th>
+                      <td colSpan={6} className="text-center py-12 text-slate-400">
+                         Belum ada data riwayat ujian siswa untuk filter ini.
+                      </td>
                     </tr>
-                  </thead>
-                  <tbody className="divide-y divide-slate-100 text-slate-700">
-                    <AnimatePresence mode="popLayout" initial={false}>
-                    {finalStudentList.length === 0 ? (
-                      <tr>
-                        <td colSpan={5} className="text-center py-12 text-slate-400">
-                           Tidak ada siswa yang ditemukan untuk kelas ini.
+                  ) : (
+                    finalStudentList.map((student) => (
+                      <motion.tr layout initial={{ opacity: 0, y: -10 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0 }} transition={{ duration: 0.2 }} key={student.studentId} className="hover:bg-slate-50 transition">
+                        <td className="py-3 px-5">
+                          <div className="font-bold text-slate-900">{student.studentName}</div>
+                          <div className="text-[10px] text-slate-500 font-mono">{student.studentNisn}</div>
                         </td>
-                      </tr>
-                    ) : (
-                      finalStudentList.map((student) => (
-                        <motion.tr layout initial={{ opacity: 0, y: -10 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0 }} transition={{ duration: 0.2 }} key={student.studentId} className="hover:bg-slate-50 transition">
-                          <td className="py-3 px-5">
-                            <div className="font-bold text-slate-900">{student.studentName}</div>
-                            <div className="text-[10px] text-slate-500 font-mono">{student.studentNisn}</div>
-                          </td>
-                          <td className="py-3 px-5 text-center">
-                            <span className={`px-2 py-0.5 rounded-full text-[10px] font-black ${student.totalAttempts > 1 ? 'bg-amber-100 text-amber-700 border border-amber-200' : 'bg-slate-100 text-slate-600'}`}>
-                              {student.totalAttempts > 1 ? `${student.totalAttempts} Kali (Remedial)` : '1 Kali'}
-                            </span>
-                          </td>
-                          <td className="py-3 px-5 text-center font-black text-slate-900">
-                            {student.bestScore}
-                          </td>
-                          <td className="py-3 px-5 text-center">
-                            <span className={`inline-flex px-2 py-0.5 rounded-full text-[10px] font-bold ${student.passedKkm ? 'bg-emerald-50 text-emerald-700 border border-emerald-200' : 'bg-rose-50 text-rose-700 border border-rose-200'}`}>
-                              {student.passedKkm ? 'Tuntas' : 'Tidak Tuntas'}
-                            </span>
-                          </td>
-                          <td className="py-3 px-5 text-center">
+                        <td className="py-3 px-5 text-center">
+                          <span className="font-semibold text-indigo-700 bg-indigo-50 px-2 py-0.5 rounded-lg text-xs">
+                            {student.studentClass}
+                          </span>
+                        </td>
+                        <td className="py-3 px-5 text-center">
+                          <span className={`px-2 py-0.5 rounded-full text-[10px] font-black ${student.totalAttempts > 1 ? 'bg-amber-100 text-amber-700 border border-amber-200' : 'bg-slate-100 text-slate-600'}`}>
+                            {student.totalAttempts > 1 ? `${student.totalAttempts} Kali (Remedial)` : '1 Kali'}
+                          </span>
+                        </td>
+                        <td className="py-3 px-5 text-center font-black text-slate-900">
+                          {student.bestScore}
+                        </td>
+                        <td className="py-3 px-5 text-center">
+                          <span className={`inline-flex px-2 py-0.5 rounded-full text-[10px] font-bold ${student.passedKkm ? 'bg-emerald-50 text-emerald-700 border border-emerald-200' : 'bg-rose-50 text-rose-700 border border-rose-200'}`}>
+                            {student.passedKkm ? 'Tuntas' : 'Tidak Tuntas'}
+                          </span>
+                        </td>
+                        <td className="py-3 px-5 text-center">
+                          <div className="flex items-center justify-center gap-1.5">
                             <button
+                              id={`btn-detail-riwayat-${student.studentId}`}
                               onClick={() => {
                                 setSelectedRiwayatStudent({
                                   studentId: student.studentId,
                                   studentName: student.studentName,
                                   studentNisn: student.studentNisn
                                 });
+                                setConfirmingAttemptId(null);
                                 setIsRiwayatModalOpen(true);
                               }}
-                              className="px-3 py-1.5 bg-indigo-50 text-indigo-700 rounded-lg text-xs font-bold hover:bg-indigo-100 transition cursor-pointer"
+                              className="px-3 py-1.5 bg-indigo-50 text-indigo-700 hover:bg-indigo-100 rounded-lg text-xs font-bold transition cursor-pointer"
                             >
                               Lihat Detail
                             </button>
-                          </td>
-                        </motion.tr>
-                      ))
-                    )}
-                    </AnimatePresence>
-                  </tbody>
-                </table>
-              )}
+                            <button
+                              id={`btn-delete-student-${student.studentId}`}
+                              onClick={() => setStudentToDeleteFromRiwayat(student)}
+                              className="p-1.5 bg-rose-50 text-rose-600 hover:bg-rose-100 hover:text-rose-700 rounded-lg transition cursor-pointer"
+                              title={`Hapus Riwayat ${student.studentName}`}
+                            >
+                              <Trash2 className="w-4 h-4" />
+                            </button>
+                          </div>
+                        </td>
+                      </motion.tr>
+                    ))
+                  )}
+                  </AnimatePresence>
+                </tbody>
+              </table>
             </div>
             
-            {riwayatSelectedExamId && riwayatSelectedClass && (
-              <div className="p-3 bg-slate-50 text-xs text-slate-500 border-t border-slate-200 flex justify-between">
-                <span>Menampilkan {finalStudentList.length} siswa</span>
-              </div>
-            )}
+            <div className="p-3 bg-slate-50 text-xs text-slate-500 border-t border-slate-200 flex justify-between">
+              <span>Menampilkan {finalStudentList.length} siswa</span>
+            </div>
           </div>
         </div>
         );
       })()}
       {/* TAB 5: EVALUASI SOAL & HASIL UJIAN */}
-{activeTab === 'evaluasi' && (
+      {activeTab === 'evaluasi' && (() => {
+        // Group submitted attempts by student so each student appears once with their latest attempt
+        const evalStudentMap: Record<string, ExamAttempt> = {};
+        filteredRekapAttempts.filter(a => a.status === 'submitted').forEach(att => {
+          if (!evalStudentMap[att.studentId] || new Date(att.startedAt).getTime() > new Date(evalStudentMap[att.studentId].startedAt).getTime()) {
+            evalStudentMap[att.studentId] = att;
+          }
+        });
+        const evalStudentList = Object.values(evalStudentMap);
+
+        return (
         <div className="space-y-4">
           <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-3 bg-white p-4 rounded-2xl border border-slate-200 shadow-2xs">
             <div>
@@ -2721,9 +2964,12 @@ export default function GuruPanel({
             
             <div className="flex items-center gap-2 overflow-x-auto pb-1 md:pb-0 hide-scrollbar max-w-full">
               <select
-                value={selectedExamId}
-                onChange={(e) => setSelectedExamId(e.target.value)}
-                className="px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-xs font-bold text-slate-700 focus:outline-none focus:ring-2 focus:ring-indigo-500 cursor-pointer"
+                value={selectedExam?.id || selectedExamId}
+                onChange={(e) => {
+                  setSelectedExamId(e.target.value);
+                  setRiwayatSelectedExamId(e.target.value);
+                }}
+                className="px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-xs font-bold text-slate-700 focus:outline-none focus:ring-2 focus:ring-indigo-500 cursor-pointer min-w-[170px]"
               >
                 {exams.map(ex => (
                   <option key={ex.id} value={ex.id}>{ex.title}</option>
@@ -2732,7 +2978,10 @@ export default function GuruPanel({
 
               <select
                 value={rekapClassFilter}
-                onChange={(e) => setRekapClassFilter(e.target.value)}
+                onChange={(e) => {
+                  setRekapClassFilter(e.target.value);
+                  setRiwayatSelectedClass(e.target.value);
+                }}
                 className="px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-xs font-bold text-slate-700 focus:outline-none focus:ring-2 focus:ring-indigo-500 cursor-pointer"
               >
                 <option value="Semua Kelas">Semua Kelas</option>
@@ -2745,13 +2994,13 @@ export default function GuruPanel({
 
           <div className="bg-white rounded-2xl border border-slate-200 shadow-2xs overflow-hidden p-6">
             <div className="space-y-6">
-              {filteredRekapAttempts.filter(a => a.status === 'submitted').length === 0 ? (
+              {evalStudentList.length === 0 ? (
                   <div className="text-center py-10 text-slate-500 text-sm">
                     Belum ada siswa yang menyelesaikan ujian ini di kelas yang dipilih.
                   </div>
                 ) : (
                   <div className="flex flex-col gap-3">
-                    {filteredRekapAttempts.filter(a => a.status === 'submitted').map((att) => (
+                    {evalStudentList.map((att) => (
                       <div key={att.id} className="p-4 border border-slate-200 rounded-xl bg-slate-50 hover:bg-slate-100 transition flex items-center justify-between">
                         <div>
                           <h3 className="font-bold text-slate-900">{att.studentName}</h3>
@@ -2774,7 +3023,8 @@ export default function GuruPanel({
               </div>
           </div>
         </div>
-      )}
+        );
+      })()}
         </main>
       </div>
 
@@ -2846,7 +3096,7 @@ export default function GuruPanel({
                   };
 
                   return (
-                    <div key={q.id} className="p-5 bg-slate-50 border border-slate-200 rounded-xl space-y-4">
+                    <div key={`${q.id}_${idx}`} className="p-5 bg-slate-50 border border-slate-200 rounded-xl space-y-4">
                       <div>
                         <span className="text-xs font-bold text-indigo-600 mb-1 block">Soal No. {idx + 1} ({q.type.replace('_', ' ').toUpperCase()}) - Maks: {q.points} Poin</span>
                         <div
@@ -2992,6 +3242,73 @@ export default function GuruPanel({
                 </div>
               </div>
 
+              {/* JENIS / TIPE SOAL */}
+              <div>
+                <label className="block font-bold text-slate-700 mb-1">
+                  Jenis / Tipe Soal yang Dibuat AI <span className="text-purple-600">*</span>
+                </label>
+                <select
+                  value={aiTypePreset}
+                  onChange={(e) => handleAiTypePresetChange(e.target.value)}
+                  className="w-full p-2.5 bg-slate-50 border border-slate-300 rounded-xl font-semibold text-slate-800 focus:ring-2 focus:ring-purple-500 cursor-pointer"
+                >
+                  <option value="pilihan_ganda">Pilihan Ganda (Single Choice - Opsi A, B, C, D)</option>
+                  <option value="pilihan_ganda_kompleks">Pilihan Ganda Kompleks (Multi Choice / Jawaban Lebih Dari Satu)</option>
+                  <option value="essay">Uraian / Essay (Analisis & Kunci Rubrik)</option>
+                  <option value="isian">Isian Singkat (Jawaban Kata/Angka Singkat)</option>
+                  <option value="menjodohkan">Menjodohkan (Matching Premis & Jawaban Pasangan)</option>
+                  <option value="benar_salah">Benar dan Salah (True / False)</option>
+                  <option value="campuran">Campuran (Variasi Otomatis Semua Jenis)</option>
+                  <option value="kustom">Kustom (Pilih Kombinasi Beberapa Jenis...)</option>
+                </select>
+
+                {/* Penjelasan Ringkas Jenis Soal */}
+                <div className="mt-1.5 text-[11px] text-purple-800 bg-purple-50 border border-purple-200/80 rounded-lg p-2.5 flex items-start gap-2">
+                  <Sparkles className="w-3.5 h-3.5 text-purple-600 shrink-0 mt-0.5" />
+                  <span className="leading-relaxed">
+                    {aiTypePreset === 'pilihan_ganda' && 'AI akan membuat soal Pilihan Ganda dengan 4 opsi pilihan (A, B, C, D) dan 1 kunci jawaban benar.'}
+                    {aiTypePreset === 'pilihan_ganda_kompleks' && 'AI akan membuat soal AKM dengan pilihan jawaban benar lebih dari satu (multi-select).'}
+                    {aiTypePreset === 'essay' && 'AI akan membuat soal Uraian / Essay mendalam lengkap dengan rubrik pembahasan penilaian guru.'}
+                    {aiTypePreset === 'isian' && 'AI akan membuat soal Isian Singkat dengan kunci jawaban pasti berupa kata atau angka.'}
+                    {aiTypePreset === 'menjodohkan' && 'AI akan membuat butir soal Menjodohkan pasangan premis sebelah kiri dengan jawaban sebelah kanan.'}
+                    {aiTypePreset === 'benar_salah' && 'AI akan membuat butir evaluasi pernyataan Benar atau Salah berbasis stimulus konteks.'}
+                    {aiTypePreset === 'campuran' && 'AI akan mengombinasikan berbagai jenis soal (PG, Kompleks, Isian, Essay, Menjodohkan, B/S) secara variatif.'}
+                    {aiTypePreset === 'kustom' && 'Silakan centang jenis-jenis soal yang ingin Anda kombinasikan di bawah ini:'}
+                  </span>
+                </div>
+
+                {/* Checklist jika memilih Kustom */}
+                {aiTypePreset === 'kustom' && (
+                  <div className="mt-2 p-2.5 bg-slate-50 border border-slate-200 rounded-xl grid grid-cols-2 sm:grid-cols-3 gap-2">
+                    {[
+                      { id: 'pilihan_ganda', label: 'Pilihan Ganda' },
+                      { id: 'pilihan_ganda_kompleks', label: 'PG Kompleks' },
+                      { id: 'essay', label: 'Uraian / Essay' },
+                      { id: 'isian', label: 'Isian Singkat' },
+                      { id: 'menjodohkan', label: 'Menjodohkan' },
+                      { id: 'benar_salah', label: 'Benar / Salah' },
+                    ].map((item) => (
+                      <label
+                        key={item.id}
+                        className={`flex items-center gap-1.5 p-2 rounded-lg border text-[11px] font-semibold cursor-pointer transition ${
+                          aiTypes.includes(item.id as QuestionType)
+                            ? 'bg-purple-100/90 border-purple-300 text-purple-900'
+                            : 'bg-white border-slate-200 text-slate-600 hover:bg-slate-100'
+                        }`}
+                      >
+                        <input
+                          type="checkbox"
+                          checked={aiTypes.includes(item.id as QuestionType)}
+                          onChange={() => handleToggleCustomType(item.id as QuestionType)}
+                          className="rounded text-purple-600 focus:ring-purple-500"
+                        />
+                        <span>{item.label}</span>
+                      </label>
+                    ))}
+                  </div>
+                )}
+              </div>
+
               <div>
                 <label className="block font-bold text-slate-700 mb-1">
                   Materi Pokok / Topik / Stimulus Soal
@@ -3053,9 +3370,10 @@ export default function GuruPanel({
 
             {/* MODAL RIWAYAT & REMEDIAL */}
       {isRiwayatModalOpen && selectedRiwayatStudent && (() => {
+        const currentExamId = riwayatSelectedExamId || selectedExamId || exams[0]?.id;
         const studentAttempts = attempts.filter(a => 
           a.status === 'submitted' && 
-          a.examId === riwayatSelectedExamId &&
+          a.examId === currentExamId &&
           a.studentId === selectedRiwayatStudent.studentId
         ).sort((a,b) => new Date(a.startedAt).getTime() - new Date(b.startedAt).getTime());
 
@@ -3067,55 +3385,97 @@ export default function GuruPanel({
                 <h3 className="font-bold text-base text-slate-900">Detail Riwayat & Remedial Siswa</h3>
                 <p className="text-xs text-slate-500 mt-1">{selectedRiwayatStudent.studentName} ({selectedRiwayatStudent.studentNisn})</p>
               </div>
-              <button onClick={() => setIsRiwayatModalOpen(false)} className="text-slate-400 hover:text-slate-600 cursor-pointer">
-                <X className="w-5 h-5" />
-              </button>
+              <div className="flex items-center gap-2">
+                <button
+                  id="btn-delete-all-student-attempts"
+                  onClick={() => {
+                    const newAttempts = attempts.filter(a => !(a.examId === currentExamId && a.studentId === selectedRiwayatStudent.studentId));
+                    onUpdateAttempts(newAttempts);
+                    setIsRiwayatModalOpen(false);
+                    showToast('Riwayat Siswa Dihapus', `Data riwayat untuk ${selectedRiwayatStudent.studentName} berhasil dihapus.`, 'delete');
+                  }}
+                  className="px-3 py-1.5 bg-rose-50 text-rose-600 hover:bg-rose-100 hover:text-rose-700 rounded-xl text-xs font-bold flex items-center gap-1.5 transition cursor-pointer"
+                  title="Hapus seluruh riwayat siswa ini pada ujian ini"
+                >
+                  <Trash2 className="w-4 h-4" />
+                  <span>Hapus Riwayat Siswa</span>
+                </button>
+                <button onClick={() => setIsRiwayatModalOpen(false)} className="text-slate-400 hover:text-slate-600 cursor-pointer">
+                  <X className="w-5 h-5" />
+                </button>
+              </div>
             </div>
             
             <div className="space-y-4">
-              {studentAttempts.map((att, idx) => (
-                <div key={att.id} className="bg-slate-50 border border-slate-200 rounded-xl p-4 flex flex-col sm:flex-row gap-4 items-start sm:items-center justify-between">
-                  <div>
-                    <h4 className="font-bold text-slate-900 text-sm">
-                      {idx === 0 ? 'Percobaan Pertama' : `Percobaan Remedial Ke-${idx}`}
-                    </h4>
-                    <p className="text-xs text-slate-500 mt-1">
-                      Waktu Mulai: {new Date(att.startedAt).toLocaleString('id-ID', { dateStyle: 'medium', timeStyle: 'short' })}
-                    </p>
-                    <p className="text-xs text-slate-500">
-                      Waktu Kumpul: {att.submittedAt ? new Date(att.submittedAt).toLocaleString('id-ID', { dateStyle: 'medium', timeStyle: 'short' }) : '-'}
-                    </p>
-                  </div>
-                  <div className="flex items-center gap-4">
-                    <div className="text-center">
-                      <span className="block text-[10px] text-slate-500 font-bold uppercase tracking-wider mb-1">Nilai</span>
-                      <span className="text-xl font-black text-slate-900">{att.totalScore}</span>
-                    </div>
-                    <div className="text-center">
-                      <span className="block text-[10px] text-slate-500 font-bold uppercase tracking-wider mb-1">Status</span>
-                      <span className={`inline-flex px-2 py-0.5 rounded-full text-[10px] font-bold ${att.passedKkm ? 'bg-emerald-50 text-emerald-700 border border-emerald-200' : 'bg-rose-50 text-rose-700 border border-rose-200'}`}>
-                        {att.passedKkm ? 'Tuntas' : 'Tidak Tuntas'}
-                      </span>
-                    </div>
-                    <button
-                      onClick={() => {
-                         if(confirm('Apakah Anda yakin ingin menghapus data percobaan ujian ini?')) {
-                            const newAttempts = attempts.filter(a => a.id !== att.id);
-                            onUpdateAttempts(newAttempts);
-                            // If it was the last attempt, close modal
-                            if (studentAttempts.length === 1) {
-                                setIsRiwayatModalOpen(false);
-                            }
-                         }
-                      }}
-                      className="p-2 bg-rose-50 text-rose-600 rounded-lg hover:bg-rose-100 transition cursor-pointer shrink-0"
-                      title="Hapus Percobaan"
-                    >
-                      <Trash2 className="w-5 h-5" />
-                    </button>
-                  </div>
+              {studentAttempts.length === 0 ? (
+                <div className="py-8 text-center text-slate-400 text-xs">
+                  Tidak ada data percobaan ujian untuk siswa ini.
                 </div>
-              ))}
+              ) : (
+                studentAttempts.map((att, idx) => (
+                  <div key={att.id} className="bg-slate-50 border border-slate-200 rounded-xl p-4 flex flex-col sm:flex-row gap-4 items-start sm:items-center justify-between">
+                    <div>
+                      <h4 className="font-bold text-slate-900 text-sm">
+                        {idx === 0 ? 'Percobaan Pertama' : `Percobaan Remedial Ke-${idx}`}
+                      </h4>
+                      <p className="text-xs text-slate-500 mt-1">
+                        Waktu Mulai: {new Date(att.startedAt).toLocaleString('id-ID', { dateStyle: 'medium', timeStyle: 'short' })}
+                      </p>
+                      <p className="text-xs text-slate-500">
+                        Waktu Kumpul: {att.submittedAt ? new Date(att.submittedAt).toLocaleString('id-ID', { dateStyle: 'medium', timeStyle: 'short' }) : '-'}
+                      </p>
+                    </div>
+                    <div className="flex items-center gap-4">
+                      <div className="text-center">
+                        <span className="block text-[10px] text-slate-500 font-bold uppercase tracking-wider mb-1">Nilai</span>
+                        <span className="text-xl font-black text-slate-900">{att.totalScore}</span>
+                      </div>
+                      <div className="text-center">
+                        <span className="block text-[10px] text-slate-500 font-bold uppercase tracking-wider mb-1">Status</span>
+                        <span className={`inline-flex px-2 py-0.5 rounded-full text-[10px] font-bold ${att.passedKkm ? 'bg-emerald-50 text-emerald-700 border border-emerald-200' : 'bg-rose-50 text-rose-700 border border-rose-200'}`}>
+                          {att.passedKkm ? 'Tuntas' : 'Tidak Tuntas'}
+                        </span>
+                      </div>
+                      
+                      {confirmingAttemptId === att.id ? (
+                        <div className="flex items-center gap-1.5 bg-rose-50 border border-rose-200 p-1.5 rounded-xl">
+                          <span className="text-[11px] font-bold text-rose-700 px-1">Hapus?</span>
+                          <button
+                            id={`btn-confirm-yes-attempt-${att.id}`}
+                            onClick={() => {
+                              const newAttempts = attempts.filter(a => a.id !== att.id);
+                              onUpdateAttempts(newAttempts);
+                              setConfirmingAttemptId(null);
+                              showToast('Percobaan Dihapus', 'Data percobaan ujian berhasil dihapus.', 'delete');
+                              if (studentAttempts.length <= 1) {
+                                setIsRiwayatModalOpen(false);
+                              }
+                            }}
+                            className="px-2.5 py-1 bg-rose-600 hover:bg-rose-700 text-white rounded-lg text-xs font-bold transition cursor-pointer shadow-2xs"
+                          >
+                            Ya
+                          </button>
+                          <button
+                            onClick={() => setConfirmingAttemptId(null)}
+                            className="px-2 py-1 bg-slate-200 hover:bg-slate-300 text-slate-700 rounded-lg text-xs font-bold transition cursor-pointer"
+                          >
+                            Batal
+                          </button>
+                        </div>
+                      ) : (
+                        <button
+                          id={`btn-trigger-delete-attempt-${att.id}`}
+                          onClick={() => setConfirmingAttemptId(att.id)}
+                          className="p-2 bg-rose-50 text-rose-600 hover:bg-rose-100 hover:text-rose-700 rounded-lg transition cursor-pointer shrink-0"
+                          title="Hapus Percobaan"
+                        >
+                          <Trash2 className="w-5 h-5" />
+                        </button>
+                      )}
+                    </div>
+                  </div>
+                ))
+              )}
             </div>
             
             <div className="mt-6 pt-4 border-t border-slate-100 flex justify-end">
@@ -3128,6 +3488,129 @@ export default function GuruPanel({
             </div>
           </div>
         </div>
+        );
+      })()}
+
+      {/* MODAL HAPUS SEMUA RIWAYAT */}
+      {isDeleteAllRiwayatModalOpen && (() => {
+        const activeExamId = riwayatSelectedExamId || selectedExamId || exams[0]?.id || '';
+        const activeExam = exams.find(e => e.id === activeExamId) || exams[0];
+        const activeClass = riwayatSelectedClass || 'Semua Kelas';
+        const countToDelete = attempts.filter(a => {
+          if (a.examId !== activeExamId) return false;
+          if (activeClass !== 'Semua Kelas' && a.studentClass !== activeClass) return false;
+          return a.status === 'submitted';
+        }).length;
+
+        return (
+          <div className="fixed inset-0 z-50 bg-slate-900/60 flex items-center justify-center p-4 backdrop-blur-xs">
+            <div className="bg-white rounded-2xl max-w-md w-full p-6 shadow-2xl border border-slate-200">
+              <div className="flex items-center gap-3 text-rose-600 mb-3">
+                <div className="w-10 h-10 rounded-full bg-rose-100 flex items-center justify-center shrink-0">
+                  <Trash2 className="w-5 h-5" />
+                </div>
+                <div>
+                  <h3 className="font-bold text-base text-slate-900">Hapus Semua Riwayat Ujian?</h3>
+                  <p className="text-xs text-slate-500">Konfirmasi pembersihan data riwayat</p>
+                </div>
+              </div>
+
+              <div className="bg-amber-50 border border-amber-200 rounded-xl p-3 mb-4 text-xs text-amber-800 leading-relaxed">
+                <p>
+                  Anda akan menghapus <strong>{countToDelete}</strong> data riwayat ujian siswa pada ujian <strong>{activeExam?.title}</strong>
+                  {activeClass !== 'Semua Kelas' ? ` (Kelas ${activeClass})` : ' (Semua Kelas)'}.
+                </p>
+                <p className="mt-1.5 text-rose-700 font-semibold">
+                  Catatan: Siswa yang riwayatnya dihapus akan otomatis hilang dari tab Evaluasi Soal dan Rekap & Laporan.
+                </p>
+              </div>
+
+              <div className="flex items-center justify-end gap-2 pt-2 border-t border-slate-100">
+                <button
+                  onClick={() => setIsDeleteAllRiwayatModalOpen(false)}
+                  className="px-4 py-2 bg-slate-100 text-slate-700 rounded-xl text-xs font-bold hover:bg-slate-200 transition cursor-pointer"
+                >
+                  Batal
+                </button>
+                <button
+                  id="btn-confirm-delete-all-riwayat"
+                  onClick={() => {
+                    const newAttempts = attempts.filter(a => {
+                      if (a.examId !== activeExamId) return true;
+                      if (activeClass !== 'Semua Kelas' && a.studentClass !== activeClass) return true;
+                      return false;
+                    });
+                    onUpdateAttempts(newAttempts);
+                    setIsDeleteAllRiwayatModalOpen(false);
+                    showToast('Riwayat Berhasil Dihapus', `Sebanyak ${countToDelete} data riwayat ujian berhasil dihapus.`, 'delete');
+                  }}
+                  className="px-4 py-2 bg-rose-600 hover:bg-rose-700 text-white rounded-xl text-xs font-bold transition cursor-pointer shadow-xs"
+                >
+                  Ya, Hapus Semua ({countToDelete})
+                </button>
+              </div>
+            </div>
+          </div>
+        );
+      })()}
+
+      {/* MODAL HAPUS RIWAYAT SISWA TERTENTU */}
+      {studentToDeleteFromRiwayat && (() => {
+        const activeExamId = riwayatSelectedExamId || selectedExamId || exams[0]?.id || '';
+        const activeExam = exams.find(e => e.id === activeExamId) || exams[0];
+
+        return (
+          <div className="fixed inset-0 z-50 bg-slate-900/60 flex items-center justify-center p-4 backdrop-blur-xs">
+            <div className="bg-white rounded-2xl max-w-md w-full p-6 shadow-2xl border border-slate-200">
+              <div className="flex items-center gap-3 text-rose-600 mb-3">
+                <div className="w-10 h-10 rounded-full bg-rose-100 flex items-center justify-center shrink-0">
+                  <Trash2 className="w-5 h-5" />
+                </div>
+                <div>
+                  <h3 className="font-bold text-base text-slate-900">Hapus Riwayat Siswa?</h3>
+                  <p className="text-xs text-slate-500">Konfirmasi penghapusan data siswa</p>
+                </div>
+              </div>
+
+              <div className="bg-slate-50 border border-slate-200 rounded-xl p-3 mb-4 text-xs text-slate-600 leading-relaxed">
+                <p>
+                  Apakah Anda yakin ingin menghapus seluruh riwayat ujian untuk:
+                </p>
+                <div className="mt-2 font-bold text-slate-900 text-sm">
+                  {studentToDeleteFromRiwayat.studentName}
+                </div>
+                <div className="text-[11px] text-slate-500 font-mono">
+                  NISN: {studentToDeleteFromRiwayat.studentNisn} • Ujian: {activeExam?.title}
+                </div>
+                <p className="mt-2 text-rose-600 font-semibold">
+                  Siswa ini juga akan otomatis hilang dari Evaluasi Soal dan Rekap & Laporan.
+                </p>
+              </div>
+
+              <div className="flex items-center justify-end gap-2 pt-2 border-t border-slate-100">
+                <button
+                  onClick={() => setStudentToDeleteFromRiwayat(null)}
+                  className="px-4 py-2 bg-slate-100 text-slate-700 rounded-xl text-xs font-bold hover:bg-slate-200 transition cursor-pointer"
+                >
+                  Batal
+                </button>
+                <button
+                  id="btn-confirm-delete-student-row"
+                  onClick={() => {
+                    const newAttempts = attempts.filter(
+                      a => !(a.examId === activeExamId && a.studentId === studentToDeleteFromRiwayat.studentId)
+                    );
+                    onUpdateAttempts(newAttempts);
+                    showToast('Riwayat Siswa Dihapus', `Data riwayat ${studentToDeleteFromRiwayat.studentName} berhasil dihapus.`, 'delete');
+                    setStudentToDeleteFromRiwayat(null);
+                  }}
+                  className="px-4 py-2 bg-rose-600 hover:bg-rose-700 text-white rounded-xl text-xs font-bold transition cursor-pointer shadow-xs"
+                >
+                  Ya, Hapus Siswa
+                </button>
+              </div>
+            </div>
+          </div>
         );
       })()}
 
@@ -3992,7 +4475,7 @@ export default function GuruPanel({
             <div className="flex items-center justify-between pb-3 mb-4 border-b border-slate-100">
               <h3 className="font-bold text-base text-slate-900 flex items-center gap-2">
                 <Edit2 className="w-4 h-4 text-indigo-600" />
-                <span>Edit Butir Soal ({editingQuestion.type.replace(/_/g, ' ')})</span>
+                <span>Edit Butir Soal</span>
               </h3>
               <button
                 onClick={() => {
@@ -4006,6 +4489,38 @@ export default function GuruPanel({
             </div>
 
             <form onSubmit={handleSaveEditQuestion} className="space-y-3 text-xs">
+              <div>
+                <label className="block font-bold text-slate-700 mb-1">
+                  Bentuk / Tipe Soal
+                </label>
+                <select
+                  value={editQuestionForm.type}
+                  onChange={(e) => {
+                    const newT = e.target.value as QuestionType;
+                    setEditQuestionForm((prev) => ({
+                      ...prev,
+                      type: newT,
+                    }));
+                  }}
+                  className="w-full p-2.5 bg-slate-50 border border-slate-300 rounded-xl font-bold text-slate-800 text-xs focus:ring-2 focus:ring-indigo-500 cursor-pointer"
+                >
+                  <option value="isian">Isian Singkat (Jawaban Kata/Angka Pasti)</option>
+                  <option value="pilihan_ganda">Pilihan Ganda (Single Choice 4 Opsi)</option>
+                  <option value="pilihan_ganda_kompleks">Pilihan Ganda Kompleks (Multi Choice AKM)</option>
+                  <option value="essay">Uraian / Essay</option>
+                  <option value="menjodohkan">Menjodohkan (Mencocokkan Pasangan)</option>
+                  <option value="benar_salah">Pernyataan Benar / Salah</option>
+                </select>
+                <p className="text-[11px] text-slate-500 mt-1">
+                  {editQuestionForm.type === 'isian' && 'Tipe Isian Singkat: Siswa mengetik jawaban langsung. Tidak ada pilihan ganda A, B, C, D.'}
+                  {editQuestionForm.type === 'pilihan_ganda' && 'Tipe Pilihan Ganda: Siswa memilih 1 dari 4 pilihan opsi (A, B, C, D).'}
+                  {editQuestionForm.type === 'pilihan_ganda_kompleks' && 'Tipe PG Kompleks: Siswa dapat mencentang lebih dari 1 pilihan jawaban benar.'}
+                  {editQuestionForm.type === 'essay' && 'Tipe Uraian / Essay: Siswa menulis penjelasan/argumen mendalam.'}
+                  {editQuestionForm.type === 'menjodohkan' && 'Tipe Menjodohkan: Siswa memasangkan premis kiri dengan pasangan kanan.'}
+                  {editQuestionForm.type === 'benar_salah' && 'Tipe Benar / Salah: Siswa menentukan Benar atau Salah untuk tiap pernyataan.'}
+                </p>
+              </div>
+
               <div>
                 <label className="block font-bold text-slate-700 mb-1">
                   Teks Soal / Pertanyaan / Stimulus
@@ -4035,7 +4550,7 @@ export default function GuruPanel({
               </div>
 
               {/* Options for single choice */}
-              {editingQuestion.type === 'pilihan_ganda' && (
+              {editQuestionForm.type === 'pilihan_ganda' && (
                 <div className="space-y-2">
                   <label className="block font-bold text-slate-700">Pilihan Jawaban (Pilih 1 Kunci):</label>
                   {editQuestionForm.options.map((opt, oIdx) => (
@@ -4076,7 +4591,7 @@ export default function GuruPanel({
               )}
 
               {/* Options for Pilihan Ganda Kompleks */}
-              {editingQuestion.type === 'pilihan_ganda_kompleks' && (
+              {editQuestionForm.type === 'pilihan_ganda_kompleks' && (
                 <div className="space-y-2">
                   <div className="flex items-center justify-between">
                     <label className="block font-bold text-slate-700">Pilihan Jawaban & Centang Kunci Benar:</label>
@@ -4140,7 +4655,7 @@ export default function GuruPanel({
               )}
 
               {/* Menjodohkan (Pemetaan Fungsi: Domain A -> Kodomain B) */}
-              {editingQuestion.type === 'menjodohkan' && (
+              {editQuestionForm.type === 'menjodohkan' && (
                 <div className="space-y-2">
                   <div className="flex items-center justify-between">
                     <div>
@@ -4214,7 +4729,7 @@ export default function GuruPanel({
               )}
 
               {/* Benar dan Salah */}
-              {editingQuestion.type === 'benar_salah' && (
+              {editQuestionForm.type === 'benar_salah' && (
                 <div className="space-y-2">
                   <div className="flex items-center justify-between">
                     <div>
@@ -4305,7 +4820,7 @@ export default function GuruPanel({
               )}
 
               {/* Isian / Essay */}
-              {editingQuestion.type === 'isian' && (
+              {editQuestionForm.type === 'isian' && (
                 <div>
                   <label className="block font-bold text-slate-700 mb-1">Kunci Jawaban Isian</label>
                   <input
@@ -4320,7 +4835,7 @@ export default function GuruPanel({
                 </div>
               )}
 
-              {editingQuestion.type === 'essay' && (
+              {editQuestionForm.type === 'essay' && (
                 <div>
                   <label className="block font-bold text-slate-700 mb-1">
                     Pedoman Penilaian / Rubrik Uraian

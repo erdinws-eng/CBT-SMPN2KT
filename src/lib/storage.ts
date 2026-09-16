@@ -2,6 +2,7 @@ import {
   User,
   Subject,
   Exam,
+  Question,
   ExamAttempt,
   SchoolSettings,
   SystemAuditLog,
@@ -416,25 +417,135 @@ export const INITIAL_AUDIT_LOGS: SystemAuditLog[] = [
 ];
 
 // Helper Local Storage Operations
-export function getStoredUsers(): User[] { return []; }
-export function saveStoredUsers(users: User[]) { }
+export function getStoredUsers(): User[] {
+  try {
+    const raw = localStorage.getItem(STORAGE_KEYS.USERS);
+    return raw ? JSON.parse(raw) : INITIAL_USERS;
+  } catch {
+    return INITIAL_USERS;
+  }
+}
+export function saveStoredUsers(users: User[]) {
+  try {
+    localStorage.setItem(STORAGE_KEYS.USERS, JSON.stringify(users));
+  } catch (e) {
+    console.error('Error saving users to localStorage:', e);
+  }
+}
 
-export function getStoredSubjects(): Subject[] { return []; }
-export function saveStoredSubjects(subjects: Subject[]) { }
+export function getStoredSubjects(): Subject[] {
+  try {
+    const raw = localStorage.getItem(STORAGE_KEYS.SUBJECTS);
+    return raw ? JSON.parse(raw) : INITIAL_SUBJECTS;
+  } catch {
+    return INITIAL_SUBJECTS;
+  }
+}
+export function saveStoredSubjects(subjects: Subject[]) {
+  try {
+    localStorage.setItem(STORAGE_KEYS.SUBJECTS, JSON.stringify(subjects));
+  } catch (e) {
+    console.error('Error saving subjects to localStorage:', e);
+  }
+}
 
-export function getStoredExams(): Exam[] { return []; }
-export function saveStoredExams(exams: Exam[]) { }
+export function ensureUniqueQuestionIds(questions: Question[]): Question[] {
+  if (!Array.isArray(questions)) return [];
+  const seenIds = new Set<string>();
+  return questions.map((q, idx) => {
+    let id = q.id;
+    if (!id || seenIds.has(id)) {
+      id = `${id || 'q'}_dup_${idx + 1}_${Math.random().toString(36).substring(2, 7)}`;
+    }
+    seenIds.add(id);
+    return id !== q.id ? { ...q, id } : q;
+  });
+}
 
-export function getStoredAttempts(): ExamAttempt[] { return []; }
-export function saveStoredAttempts(attempts: ExamAttempt[]) { }
+export function sanitizeExams(exams: Exam[]): Exam[] {
+  if (!Array.isArray(exams)) return [];
+  return exams.map((ex) => ({
+    ...ex,
+    questions: ensureUniqueQuestionIds(ex.questions || []),
+  }));
+}
+
+export function getStoredExams(): Exam[] {
+  try {
+    const raw = localStorage.getItem(STORAGE_KEYS.EXAMS);
+    const parsed = raw ? JSON.parse(raw) : INITIAL_EXAMS;
+    return sanitizeExams(parsed);
+  } catch {
+    return sanitizeExams(INITIAL_EXAMS);
+  }
+}
+export function saveStoredExams(exams: Exam[]) {
+  try {
+    const sanitized = sanitizeExams(exams);
+    localStorage.setItem(STORAGE_KEYS.EXAMS, JSON.stringify(sanitized));
+  } catch (e) {
+    console.error('Error saving exams to localStorage:', e);
+  }
+}
+
+export function getStoredAttempts(): ExamAttempt[] {
+  try {
+    const raw = localStorage.getItem(STORAGE_KEYS.ATTEMPTS);
+    return raw ? JSON.parse(raw) : INITIAL_ATTEMPTS;
+  } catch {
+    return INITIAL_ATTEMPTS;
+  }
+}
+export function saveStoredAttempts(attempts: ExamAttempt[]) {
+  try {
+    localStorage.setItem(STORAGE_KEYS.ATTEMPTS, JSON.stringify(attempts));
+  } catch (e) {
+    console.error('Error saving attempts to localStorage:', e);
+  }
+}
 
 export function getStoredSettings(): SchoolSettings { 
-  return { schoolName: 'Nama Sekolah', schoolLogo: '', academicYear: '2023/2024', semester: 'Genap', headmasterName: '', headmasterNip: '' };
+  try {
+    const raw = localStorage.getItem(STORAGE_KEYS.SETTINGS);
+    return raw ? JSON.parse(raw) : INITIAL_SCHOOL_SETTINGS;
+  } catch {
+    return INITIAL_SCHOOL_SETTINGS;
+  }
 }
-export function saveStoredSettings(settings: SchoolSettings) { }
+export function saveStoredSettings(settings: SchoolSettings) {
+  try {
+    localStorage.setItem(STORAGE_KEYS.SETTINGS, JSON.stringify(settings));
+  } catch (e) {
+    console.error('Error saving settings to localStorage:', e);
+  }
+}
 
-export function getStoredAuditLogs(): SystemAuditLog[] { return []; }
-export function addAuditLog(userName: string, role: string, action: string, details: string) { return []; }
+export function getStoredAuditLogs(): SystemAuditLog[] {
+  try {
+    const raw = localStorage.getItem(STORAGE_KEYS.AUDIT_LOGS);
+    return raw ? JSON.parse(raw) : INITIAL_AUDIT_LOGS;
+  } catch {
+    return INITIAL_AUDIT_LOGS;
+  }
+}
+export function addAuditLog(userName: string, role: string, action: string, details: string): SystemAuditLog[] {
+  try {
+    const logs = getStoredAuditLogs();
+    const newLog: SystemAuditLog = {
+      id: 'log_' + Date.now(),
+      timestamp: new Date().toISOString(),
+      userName,
+      role: role as any,
+      action,
+      details,
+    };
+    const updated = [newLog, ...logs].slice(0, 100);
+    localStorage.setItem(STORAGE_KEYS.AUDIT_LOGS, JSON.stringify(updated));
+    return updated;
+  } catch {
+    return [];
+  }
+}
 
 export function getCurrentUser(): User | null {
   try {
