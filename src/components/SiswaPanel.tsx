@@ -501,7 +501,7 @@ export default function SiswaPanel({
   if (!activeExam) {
     const riwayatAttempts = attempts.filter(
       (a) => a.studentId === currentUser.id && a.status === 'submitted'
-    );
+    ).sort((a, b) => new Date(b.startedAt).getTime() - new Date(a.startedAt).getTime());
 
     return (
       <div id="siswa-panel-layout" className="flex h-[calc(100vh-64px)] overflow-hidden bg-slate-50">
@@ -603,9 +603,10 @@ export default function SiswaPanel({
 
                   <div className="grid grid-cols-1 xl:grid-cols-2 2xl:grid-cols-3 gap-6">
                     {myExams.map((exam) => {
-                      const attempt = attempts.find(
+                      // Find the latest attempt by sorting submittedAt or startedAt
+                      const attempt = [...attempts].filter(
                         (a) => a.examId === exam.id && a.studentId === currentUser.id
-                      );
+                      ).sort((a, b) => new Date(b.startedAt).getTime() - new Date(a.startedAt).getTime())[0];
                       const isFinished = attempt?.status === 'submitted';
                       const isDisqualified = attempt?.status === 'violation_disqualified';
                       const isPassed = (attempt?.scorePercentage || 0) >= exam.kkm;
@@ -719,7 +720,7 @@ export default function SiswaPanel({
                           <div className="pt-3 border-t border-slate-100 mt-4">
                             {isFinished ? (
                               <div className="flex flex-col sm:flex-row items-center gap-2">
-                                {exam.allowRetake && (
+                                {exam.allowRetake && !isPassed ? (
                                   <button
                                     onClick={() => handleStartExam(exam)}
                                     className="w-full sm:w-auto py-2.5 px-4 bg-indigo-600 hover:bg-indigo-700 text-white rounded-xl font-bold text-xs flex items-center justify-center gap-1 transition cursor-pointer"
@@ -727,6 +728,11 @@ export default function SiswaPanel({
                                     <RotateCcw className="w-3.5 h-3.5" />
                                     <span>Remedial</span>
                                   </button>
+                                ) : (
+                                  <div className="w-full sm:w-auto py-2.5 px-4 bg-slate-100 text-slate-500 rounded-xl font-bold text-xs flex items-center justify-center gap-1">
+                                    <CheckCircle className="w-3.5 h-3.5" />
+                                    <span>Ujian Telah Selesai</span>
+                                  </div>
                                 )}
                               </div>
                             ) : isDisqualified ? (

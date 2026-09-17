@@ -288,8 +288,8 @@ export default function GuruPanel({
   };
 
   const selectedExam = exams.find((e) => e.id === (selectedExamId || riwayatSelectedExamId)) || exams[0];
-  const allExamAttempts = attempts.filter((a) => a.examId === selectedExam?.id);
-  const examAttempts = attempts.filter((a) => a.examId === selectedExam?.id && (a.status === 'submitted' || a.status === 'violation_disqualified'));
+  const allExamAttempts = attempts.filter((a) => a.examId === selectedExam?.id).sort((a, b) => a.studentName.localeCompare(b.studentName));
+  const examAttempts = attempts.filter((a) => a.examId === selectedExam?.id && (a.status === 'submitted' || a.status === 'violation_disqualified')).sort((a, b) => a.studentName.localeCompare(b.studentName));
   const uniqueRekapClasses = Array.from(new Set(examAttempts.map((a) => a.studentClass).filter(Boolean))).sort();
   const filteredRekapAttempts = examAttempts.filter((a) => rekapClassFilter === 'Semua Kelas' || a.studentClass === rekapClassFilter);
 
@@ -2645,7 +2645,9 @@ export default function GuruPanel({
           }
         });
 
-        const rekapStudentList = Object.values(rekapStudentGroups);
+        const rekapStudentList = Object.values(rekapStudentGroups).sort((a, b) => 
+          a.studentName.localeCompare(b.studentName)
+        );
 
         return (
         <div className="space-y-4">
