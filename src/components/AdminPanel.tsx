@@ -276,7 +276,7 @@ export default function AdminPanel({
       s.username.toLowerCase().includes(searchTerm.toLowerCase());
     const matchClass = filterClass === 'all' || s.classGrade === filterClass;
     return matchSearch && matchClass;
-  });
+  }).sort((a, b) => a.name.localeCompare(b.name));
 
   const filteredTeachers = teachers.filter((t) => {
     const subjectsText = (t.subjectNames?.join(' ') || t.subjectName || '').toLowerCase();
@@ -286,7 +286,7 @@ export default function AdminPanel({
       t.username.toLowerCase().includes(searchTerm.toLowerCase()) ||
       subjectsText.includes(searchTerm.toLowerCase())
     );
-  });
+  }).sort((a, b) => a.name.localeCompare(b.name));
 
   // Get available classes from students
   const availableClasses = Array.from(new Set(users.filter(u => u.role === 'siswa' && u.classGrade).map(u => u.classGrade as string))).sort();
@@ -1175,15 +1175,12 @@ export default function AdminPanel({
               <select
                 value={filterClass}
                 onChange={(e) => setFilterClass(e.target.value)}
-                className="py-2 px-3 bg-slate-50 border border-slate-300 rounded-xl text-xs text-slate-700 font-semibold focus:outline-none"
+                className="py-2 px-3 bg-slate-50 border border-slate-300 rounded-xl text-xs text-slate-700 font-semibold focus:outline-none focus:ring-2 focus:ring-rose-500 min-w-[140px] cursor-pointer"
               >
                 <option value="all">Semua Kelas</option>
-                <option value="7A">Kelas 7A</option>
-                <option value="7B">Kelas 7B</option>
-                <option value="8A">Kelas 8A</option>
-                <option value="8B">Kelas 8B</option>
-                <option value="9A">Kelas 9A</option>
-                <option value="9B">Kelas 9B</option>
+                {availableClasses.map(cls => (
+                  <option key={cls} value={cls}>Kelas {cls}</option>
+                ))}
               </select>
             </div>
 

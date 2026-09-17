@@ -2835,7 +2835,7 @@ export default function GuruPanel({
         const finalStudentList = studentRiwayat.filter(s =>
             s.studentName.toLowerCase().includes(searchAttemptQuery.toLowerCase()) || 
             s.studentNisn.includes(searchAttemptQuery)
-        );
+        ).sort((a, b) => a.studentName.localeCompare(b.studentName));
 
         return (
         <div className="space-y-4">
@@ -2999,7 +2999,9 @@ export default function GuruPanel({
             evalStudentMap[att.studentId] = att;
           }
         });
-        const evalStudentList = Object.values(evalStudentMap);
+        const evalStudentList = Object.values(evalStudentMap).sort((a, b) => 
+          a.studentName.localeCompare(b.studentName)
+        );
 
         return (
         <div className="space-y-4">
