@@ -289,7 +289,7 @@ export default function GuruPanel({
 
   const selectedExam = exams.find((e) => e.id === (selectedExamId || riwayatSelectedExamId)) || exams[0];
   const allExamAttempts = attempts.filter((a) => a.examId === selectedExam?.id);
-  const examAttempts = attempts.filter((a) => a.examId === selectedExam?.id && a.status === 'submitted');
+  const examAttempts = attempts.filter((a) => a.examId === selectedExam?.id && (a.status === 'submitted' || a.status === 'violation_disqualified'));
   const uniqueRekapClasses = Array.from(new Set(examAttempts.map((a) => a.studentClass).filter(Boolean))).sort();
   const filteredRekapAttempts = examAttempts.filter((a) => rekapClassFilter === 'Semua Kelas' || a.studentClass === rekapClassFilter);
 
@@ -1336,7 +1336,7 @@ export default function GuruPanel({
                     )}
                   </div>
                   <div className="mt-auto pt-3 flex items-center justify-between text-xs text-slate-500">
-                    <span>{attempts.filter((a) => a.status === 'submitted').length} Selesai Dikumpulkan</span>
+                    <span>{attempts.filter((a) => (a.status === 'submitted' || a.status === 'violation_disqualified')).length} Selesai Dikumpulkan</span>
                     <span className="text-blue-600 font-bold group-hover:translate-x-0.5 transition">Monitor →</span>
                   </div>
                 </div>
@@ -1353,7 +1353,7 @@ export default function GuruPanel({
                     </div>
                   </div>
                   {(() => {
-                    const submitted = attempts.filter((a) => a.status === 'submitted');
+                    const submitted = attempts.filter((a) => (a.status === 'submitted' || a.status === 'violation_disqualified'));
                     const avg = submitted.length > 0 ? submitted.reduce((sum, a) => sum + (a.scorePercentage || a.totalScore || 0), 0) / submitted.length : 0;
                     const passing = submitted.filter((a) => {
                       const exam = exams.find((e) => e.id === a.examId);
@@ -1634,7 +1634,7 @@ export default function GuruPanel({
                     </div>
 
                     {(() => {
-                      const submitted = attempts.filter((a) => a.status === 'submitted');
+                      const submitted = attempts.filter((a) => (a.status === 'submitted' || a.status === 'violation_disqualified'));
                       if (submitted.length === 0) {
                         return (
                           <p className="text-xs text-slate-500 py-6 text-center">
@@ -2738,7 +2738,7 @@ export default function GuruPanel({
         const activeClass = riwayatSelectedClass || 'Semua Kelas';
 
         // Find submitted attempts for this exam
-        const examSubmittedAttempts = attempts.filter(a => a.status === 'submitted' && a.examId === activeExamId);
+        const examSubmittedAttempts = attempts.filter(a => (a.status === 'submitted' || a.status === 'violation_disqualified') && a.examId === activeExamId);
         const uniqueClasses = Array.from(new Set(examSubmittedAttempts.map(a => a.studentClass).filter(Boolean))).sort();
 
         // If exam and class are selected, filter attempts for these
@@ -2944,7 +2944,7 @@ export default function GuruPanel({
       {activeTab === 'evaluasi' && (() => {
         // Group submitted attempts by student so each student appears once with their latest attempt
         const evalStudentMap: Record<string, ExamAttempt> = {};
-        filteredRekapAttempts.filter(a => a.status === 'submitted').forEach(att => {
+        filteredRekapAttempts.filter(a => (a.status === 'submitted' || a.status === 'violation_disqualified')).forEach(att => {
           if (!evalStudentMap[att.studentId] || new Date(att.startedAt).getTime() > new Date(evalStudentMap[att.studentId].startedAt).getTime()) {
             evalStudentMap[att.studentId] = att;
           }
@@ -3373,7 +3373,7 @@ export default function GuruPanel({
       {isRiwayatModalOpen && selectedRiwayatStudent && (() => {
         const currentExamId = riwayatSelectedExamId || selectedExamId || exams[0]?.id;
         const studentAttempts = attempts.filter(a => 
-          a.status === 'submitted' && 
+          (a.status === 'submitted' || a.status === 'violation_disqualified') && 
           a.examId === currentExamId &&
           a.studentId === selectedRiwayatStudent.studentId
         ).sort((a,b) => new Date(a.startedAt).getTime() - new Date(b.startedAt).getTime());
@@ -3500,7 +3500,7 @@ export default function GuruPanel({
         const countToDelete = attempts.filter(a => {
           if (a.examId !== activeExamId) return false;
           if (activeClass !== 'Semua Kelas' && a.studentClass !== activeClass) return false;
-          return a.status === 'submitted';
+          return (a.status === 'submitted' || a.status === 'violation_disqualified');
         }).length;
 
         return (

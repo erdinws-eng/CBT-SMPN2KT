@@ -37,12 +37,15 @@ export default function App() {
   const prevExamsRef = useRef<Exam[]>(exams);
   const prevAttemptsRef = useRef<ExamAttempt[]>(attempts);
 
+  const isFetchingRef = useRef(false);
+
   // Fungsi memuat data dari Supabase
   const loadDataFromSupabase = useCallback(async () => {
     const supabase = getSupabase();
     if (!supabase) return;
 
     try {
+      isFetchingRef.current = true;
       const [sbSettings, sbUsers, sbSubjects, sbExams, sbAttempts] = await Promise.all([
         supabaseService.getSchoolSettings(),
         supabaseService.getUsers(),
@@ -57,8 +60,14 @@ export default function App() {
       if (sbExams) setExams(sanitizeExams(sbExams));
       if (sbAttempts) setAttempts(sbAttempts);
       setIsDataLoaded(true);
+      
+      // Allow react to apply state before lifting the flag
+      setTimeout(() => {
+        isFetchingRef.current = false;
+      }, 500);
     } catch (err) {
       console.warn('Gagal memuat data dari Supabase:', err);
+      isFetchingRef.current = false;
     }
   }, []);
 
@@ -81,7 +90,7 @@ export default function App() {
   // Sync state changes with localStorage & Supabase (including Deletions)
   useEffect(() => {
     saveUsers(users);
-    if (getSupabaseConfig().isConfigured && isDataLoaded) {
+    if (getSupabaseConfig().isConfigured && isDataLoaded && !isFetchingRef.current) {
       users.forEach((item) => supabaseService.saveUser(item));
       const currentIds = new Set(users.map(item => item.id));
       prevUsersRef.current.forEach(old => {
@@ -93,7 +102,7 @@ export default function App() {
 
   useEffect(() => {
     saveSubjects(subjects);
-    if (getSupabaseConfig().isConfigured && isDataLoaded) {
+    if (getSupabaseConfig().isConfigured && isDataLoaded && !isFetchingRef.current) {
       subjects.forEach((item) => supabaseService.saveSubject(item));
       const currentIds = new Set(subjects.map(item => item.id));
       prevSubjectsRef.current.forEach(old => {
@@ -105,7 +114,7 @@ export default function App() {
 
   useEffect(() => {
     saveExams(exams);
-    if (getSupabaseConfig().isConfigured && isDataLoaded) {
+    if (getSupabaseConfig().isConfigured && isDataLoaded && !isFetchingRef.current) {
       exams.forEach((item) => supabaseService.saveExam(item));
       const currentIds = new Set(exams.map(item => item.id));
       prevExamsRef.current.forEach(old => {
@@ -117,7 +126,7 @@ export default function App() {
 
   useEffect(() => {
     saveAttempts(attempts);
-    if (getSupabaseConfig().isConfigured && isDataLoaded) {
+    if (getSupabaseConfig().isConfigured && isDataLoaded && !isFetchingRef.current) {
       attempts.forEach((item) => supabaseService.saveExamAttempt(item));
       const currentIds = new Set(attempts.map(item => item.id));
       prevAttemptsRef.current.forEach(old => {
