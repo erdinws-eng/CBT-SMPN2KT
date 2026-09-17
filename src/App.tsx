@@ -69,6 +69,15 @@ export default function App() {
     }
   }, [loadDataFromSupabase]);
 
+  // Polling data berkala (Live Monitor) untuk menarik progress siswa yang sedang ujian di perangkat lain
+  useEffect(() => {
+    if (!getSupabaseConfig().isConfigured) return;
+    const interval = setInterval(() => {
+      loadDataFromSupabase();
+    }, 10000); // 10 detik
+    return () => clearInterval(interval);
+  }, [loadDataFromSupabase]);
+
   // Sync state changes with localStorage & Supabase (including Deletions)
   useEffect(() => {
     saveUsers(users);

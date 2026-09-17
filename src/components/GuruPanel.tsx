@@ -288,6 +288,7 @@ export default function GuruPanel({
   };
 
   const selectedExam = exams.find((e) => e.id === (selectedExamId || riwayatSelectedExamId)) || exams[0];
+  const allExamAttempts = attempts.filter((a) => a.examId === selectedExam?.id);
   const examAttempts = attempts.filter((a) => a.examId === selectedExam?.id && a.status === 'submitted');
   const uniqueRekapClasses = Array.from(new Set(examAttempts.map((a) => a.studentClass).filter(Boolean))).sort();
   const filteredRekapAttempts = examAttempts.filter((a) => rekapClassFilter === 'Semua Kelas' || a.studentClass === rekapClassFilter);
@@ -2458,14 +2459,14 @@ export default function GuruPanel({
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-slate-100">
-                  {examAttempts.length === 0 ? (
+                  {allExamAttempts.length === 0 ? (
                     <tr>
                       <td colSpan={9} className="text-center py-10 text-slate-400">
                         Belum ada siswa yang memulai sesi pengerjaan pada ujian ini.
                       </td>
                     </tr>
                   ) : (
-                    examAttempts.map((att, idx) => {
+                    allExamAttempts.map((att, idx) => {
                       const answeredCount = Object.keys(att.answers || {}).length;
                       const totalQuestions = selectedExam?.questions.length || 1;
 
