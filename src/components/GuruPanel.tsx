@@ -1273,11 +1273,11 @@ export default function GuruPanel({
               </div>
 
               {/* 2. Key Metrics Grid (4 Stat Cards) */}
-              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 sm:gap-6">
+              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 sm:gap-6 items-stretch">
                 {/* Stat Card 1: Paket Ujian */}
                 <div
                   onClick={() => setActiveTab('jadwal')}
-                  className="bg-white rounded-2xl p-5 border border-slate-200 shadow-2xs hover:border-indigo-400 hover:shadow-md transition cursor-pointer group"
+                  className="bg-white rounded-2xl p-5 border border-slate-200 shadow-2xs hover:border-indigo-400 hover:shadow-md transition cursor-pointer group flex flex-col h-full"
                 >
                   <div className="flex items-center justify-between mb-3">
                     <span className="text-xs font-bold text-slate-500 uppercase tracking-wider">Paket Ujian</span>
@@ -1288,7 +1288,7 @@ export default function GuruPanel({
                   <div className="text-2xl sm:text-3xl font-black text-slate-900">
                     {exams.length}
                   </div>
-                  <div className="mt-1 flex items-center justify-between text-xs text-slate-500">
+                  <div className="mt-auto pt-3 flex items-center justify-between text-xs text-slate-500">
                     <span>{exams.filter((e) => e.status === 'active').length} Berstatus Aktif</span>
                     <span className="text-indigo-600 font-bold group-hover:translate-x-0.5 transition">Kelola →</span>
                   </div>
@@ -1297,7 +1297,7 @@ export default function GuruPanel({
                 {/* Stat Card 2: Total Butir Soal */}
                 <div
                   onClick={() => setActiveTab('bank_soal')}
-                  className="bg-white rounded-2xl p-5 border border-slate-200 shadow-2xs hover:border-emerald-400 hover:shadow-md transition cursor-pointer group"
+                  className="bg-white rounded-2xl p-5 border border-slate-200 shadow-2xs hover:border-emerald-400 hover:shadow-md transition cursor-pointer group flex flex-col h-full"
                 >
                   <div className="flex items-center justify-between mb-3">
                     <span className="text-xs font-bold text-slate-500 uppercase tracking-wider">Bank Butir Soal</span>
@@ -1308,7 +1308,7 @@ export default function GuruPanel({
                   <div className="text-2xl sm:text-3xl font-black text-slate-900">
                     {exams.reduce((sum, e) => sum + (e.questions?.length || 0), 0)}
                   </div>
-                  <div className="mt-1 flex items-center justify-between text-xs text-slate-500">
+                  <div className="mt-auto pt-3 flex items-center justify-between text-xs text-slate-500">
                     <span>{selectedExam ? `${selectedExam.questions.length} soal terpilih` : 'Di seluruh paket'}</span>
                     <span className="text-emerald-600 font-bold group-hover:translate-x-0.5 transition">Buka Soal →</span>
                   </div>
@@ -1317,7 +1317,7 @@ export default function GuruPanel({
                 {/* Stat Card 3: Sesi & Peserta Ujian */}
                 <div
                   onClick={() => setActiveTab('monitoring')}
-                  className="bg-white rounded-2xl p-5 border border-slate-200 shadow-2xs hover:border-blue-400 hover:shadow-md transition cursor-pointer group"
+                  className="bg-white rounded-2xl p-5 border border-slate-200 shadow-2xs hover:border-blue-400 hover:shadow-md transition cursor-pointer group flex flex-col h-full"
                 >
                   <div className="flex items-center justify-between mb-3">
                     <span className="text-xs font-bold text-slate-500 uppercase tracking-wider">Peserta & Sesi</span>
@@ -1334,7 +1334,7 @@ export default function GuruPanel({
                       </span>
                     )}
                   </div>
-                  <div className="mt-1 flex items-center justify-between text-xs text-slate-500">
+                  <div className="mt-auto pt-3 flex items-center justify-between text-xs text-slate-500">
                     <span>{attempts.filter((a) => a.status === 'submitted').length} Selesai Dikumpulkan</span>
                     <span className="text-blue-600 font-bold group-hover:translate-x-0.5 transition">Monitor →</span>
                   </div>
@@ -1343,7 +1343,7 @@ export default function GuruPanel({
                 {/* Stat Card 4: Rata-Rata Nilai & KKM */}
                 <div
                   onClick={() => setActiveTab('rekap')}
-                  className="bg-white rounded-2xl p-5 border border-slate-200 shadow-2xs hover:border-amber-400 hover:shadow-md transition cursor-pointer group"
+                  className="bg-white rounded-2xl p-5 border border-slate-200 shadow-2xs hover:border-amber-400 hover:shadow-md transition cursor-pointer group flex flex-col h-full"
                 >
                   <div className="flex items-center justify-between mb-3">
                     <span className="text-xs font-bold text-slate-500 uppercase tracking-wider">Rerata Nilai Siswa</span>
@@ -1365,7 +1365,7 @@ export default function GuruPanel({
                         <div className="text-2xl sm:text-3xl font-black text-slate-900">
                           {avg.toFixed(1)} <span className="text-xs font-bold text-slate-400">/ 100</span>
                         </div>
-                        <div className="mt-1 flex items-center justify-between text-xs text-slate-500">
+                        <div className="mt-auto pt-3 flex items-center justify-between text-xs text-slate-500">
                           <span>{passing}/{submitted.length} Lulus KKM ({passRate}%)</span>
                           <span className="text-amber-600 font-bold group-hover:translate-x-0.5 transition">Rekap →</span>
                         </div>

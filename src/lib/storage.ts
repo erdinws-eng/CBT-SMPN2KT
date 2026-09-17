@@ -288,106 +288,10 @@ export const INITIAL_EXAMS: Exam[] = [
         explanation: '8^2 + 15^2 = 64 + 225 = 289 = 17^2, maka segitiga tersebut adalah segitiga siku-siku tepat.',
       },
     ],
-  },
+  }
 ];
 
-export const INITIAL_ATTEMPTS: ExamAttempt[] = [
-  {
-    id: 'att_dewi_ipa',
-    examId: 'exam_ipa_8_pts',
-    examTitle: 'Penilaian Tengah Semester (PTS) IPA Terpadu Kelas 8',
-    subjectName: 'Ilmu Pengetahuan Alam (IPA)',
-    studentId: 'user_siswa_2',
-    studentName: 'Dewi Anjani',
-    studentNisn: '0098472191',
-    studentClass: '8A',
-    startedAt: new Date(Date.now() - 3600 * 1000 * 5).toISOString(),
-    submittedAt: new Date(Date.now() - 3600 * 1000 * 4.4).toISOString(),
-    answers: {
-      q_1: 'A. Mitokondria',
-      q_2: ['Mulut (gigi dan enzim ptialin)', 'Lambung (gerak peristaltik dan enzim pepsin)'],
-      q_3: 'protein',
-      q_4: '1. Filtrasi di glomerulus menghasilkan urin primer. 2. Reabsorpsi di tubulus kontortus proksimal menyerap zat berguna menghasilkan urin sekunder. 3. Augmentasi di tubulus distal menambahkan zat sisa menghasilkan urin sejati yang siap dikeluarkan.',
-      q_5: {
-        'Enzim Amilase / Ptialin': 'Mengubah zat tepung (amilum) menjadi maltosa',
-        'Enzim Pepsin': 'Mengubah protein menjadi pepton di lambung',
-        'Enzim Lipase': 'Menghidrolisis lemak menjadi asam lemak dan gliserol',
-      },
-      q_6: {
-        0: 'Benar',
-        1: 'Salah',
-        2: 'Benar',
-      },
-    },
-    scores: {
-      q_1: 15,
-      q_2: 20,
-      q_3: 15,
-      q_4: 25,
-      q_5: 15,
-      q_6: 10,
-    },
-    totalScore: 100,
-    maxPossibleScore: 100,
-    scorePercentage: 100,
-    passedKkm: true,
-    status: 'submitted',
-    violationCount: 0,
-    violationLogs: [],
-    teacherFeedback: 'Luar biasa! Pemahaman konsep biologi sel dan sistem organ sangat matang.',
-    isGraded: true,
-  },
-  {
-    id: 'att_bayu_ipa',
-    examId: 'exam_ipa_8_pts',
-    examTitle: 'Penilaian Tengah Semester (PTS) IPA Terpadu Kelas 8',
-    subjectName: 'Ilmu Pengetahuan Alam (IPA)',
-    studentId: 'user_siswa_3',
-    studentName: 'Bayu Setiawan',
-    studentNisn: '0098472192',
-    studentClass: '8B',
-    startedAt: new Date(Date.now() - 3600 * 1000 * 3).toISOString(),
-    submittedAt: new Date(Date.now() - 3600 * 1000 * 2.5).toISOString(),
-    answers: {
-      q_1: 'A. Mitokondria',
-      q_2: ['Mulut (gigi dan enzim ptialin)'],
-      q_3: 'lemak', // salah
-      q_4: 'Tahapan pembentukan urin ada penyaringan, penyerapan kembali dan pengeluaran.',
-      q_5: {
-        'Enzim Amilase / Ptialin': 'Mengubah zat tepung (amilum) menjadi maltosa',
-        'Enzim Pepsin': 'Mengubah protein menjadi pepton di lambung',
-        'Enzim Lipase': 'Mengubah protein menjadi pepton di lambung',
-      },
-      q_6: {
-        0: 'Benar',
-        1: 'Benar', // salah
-        2: 'Benar',
-      },
-    },
-    scores: {
-      q_1: 15,
-      q_2: 10,
-      q_3: 0,
-      q_4: 15,
-      q_5: 10,
-      q_6: 6,
-    },
-    totalScore: 56,
-    maxPossibleScore: 100,
-    scorePercentage: 56,
-    passedKkm: false,
-    status: 'submitted',
-    violationCount: 1,
-    violationLogs: [
-      {
-        timestamp: new Date(Date.now() - 3600 * 1000 * 2.8).toISOString(),
-        reason: 'Peringatan 1: Siswa beralih tab atau meminimalkan jendela ujian.',
-      },
-    ],
-    teacherFeedback: 'Nilai belum mencapai KKM (75). Silakan pelajari kembali bab enzim dan zat makanan untuk remedial.',
-    isGraded: true,
-  },
-];
+export const INITIAL_ATTEMPTS: ExamAttempt[] = [];
 
 export const INITIAL_AUDIT_LOGS: SystemAuditLog[] = [
   {
@@ -491,7 +395,16 @@ export function saveStoredExams(exams: Exam[]) {
 export function getStoredAttempts(): ExamAttempt[] {
   try {
     const raw = localStorage.getItem(STORAGE_KEYS.ATTEMPTS);
-    return raw ? JSON.parse(raw) : INITIAL_ATTEMPTS;
+    if (raw) {
+      const parsed: ExamAttempt[] = JSON.parse(raw);
+      // Hapus data mock awal (attempt_1) agar tidak nyangkut saat dashboard kosong
+      const filtered = parsed.filter(a => a.id !== 'attempt_1');
+      if (filtered.length !== parsed.length) {
+         localStorage.setItem(STORAGE_KEYS.ATTEMPTS, JSON.stringify(filtered));
+      }
+      return filtered;
+    }
+    return INITIAL_ATTEMPTS;
   } catch {
     return INITIAL_ATTEMPTS;
   }

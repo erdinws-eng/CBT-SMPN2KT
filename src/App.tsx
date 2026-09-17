@@ -54,7 +54,7 @@ export default function App() {
       if (sbSettings) setSettings(sbSettings);
       if (sbUsers && sbUsers.length > 0) setUsers(sbUsers);
       if (sbSubjects && sbSubjects.length > 0) setSubjects(sbSubjects);
-      if (sbExams && sbExams.length > 0) setExams(sanitizeExams(sbExams));
+      if (sbExams) setExams(sanitizeExams(sbExams));
       if (sbAttempts) setAttempts(sbAttempts);
       setIsDataLoaded(true);
     } catch (err) {
