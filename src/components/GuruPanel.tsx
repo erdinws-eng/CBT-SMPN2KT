@@ -260,7 +260,7 @@ export default function GuruPanel({
     id: string;
     title: string;
     subtitle?: string;
-    type: 'exam' | 'question' | 'force_submit';
+    type: 'exam' | 'question' | 'force_submit' | 'force_submit_all' | 'reset_attempt' | 'resume_attempt';
   }>({
     isOpen: false,
     id: '',
@@ -561,6 +561,42 @@ export default function GuruPanel({
       });
       onUpdateAttempts(updated);
       showToast('Ujian Dikumpulkan', `Sesi ujian ${studentName} berhasil dikumpulkan paksa.`, 'delete');
+    } else if (deleteConfirm.type === 'force_submit_all') {
+      const updated = attempts.map((att) => {
+        if (att.examId === selectedExam?.id && att.status === 'in_progress') {
+          return {
+            ...att,
+            status: 'submitted' as const,
+            submittedAt: new Date().toISOString(),
+          };
+        }
+        return att;
+      });
+      onUpdateAttempts(updated);
+      showToast('Ujian Dikumpulkan', `Semua ujian yang sedang berlangsung berhasil dikumpulkan paksa.`, 'success');
+    } else if (deleteConfirm.type === 'reset_attempt') {
+      const attemptId = deleteConfirm.id;
+      const studentName = deleteConfirm.title;
+      // Completely remove the attempt so the student can start fresh
+      const updated = attempts.filter((att) => att.id !== attemptId);
+      onUpdateAttempts(updated);
+      showToast('Ujian Direset', `Sesi ujian ${studentName} berhasil direset (mulai dari awal).`, 'delete');
+    } else if (deleteConfirm.type === 'resume_attempt') {
+      const attemptId = deleteConfirm.id;
+      const studentName = deleteConfirm.title;
+      const updated = attempts.map((att) => {
+        if (att.id === attemptId) {
+          return {
+            ...att,
+            status: 'in_progress' as const,
+            violationCount: 0,
+            submittedAt: undefined,
+          };
+        }
+        return att;
+      });
+      onUpdateAttempts(updated);
+      showToast('Sesi Dilanjutkan', `Sesi ujian ${studentName} dapat dilanjutkan (jawaban tersimpan).`, 'success');
     }
 
     setDeleteConfirm({ isOpen: false, id: '', title: '', type: 'exam' });
@@ -934,29 +970,6 @@ export default function GuruPanel({
       type: 'force_submit',
       subtitle: 'Paksa Pengumpulan Ujian',
     });
-  };
-
-  // Tindakan Pengawas: Reset untuk Membuka Ujian Siswa yang Terdampak Pelanggaran
-  const handleResetStudentExam = (attemptId: string, studentName: string) => {
-    const updated = attempts.map((att) => {
-      if (att.id === attemptId) {
-        return {
-          ...att,
-          violationCount: 0,
-          status: 'in_progress' as const,
-          submittedAt: undefined,
-          answers: {},
-          scores: {},
-          scorePercentage: 0,
-          totalScore: 0,
-          totalEarnedPoints: 0,
-          passedKkm: false,
-        };
-      }
-      return att;
-    });
-    onUpdateAttempts(updated);
-    showSuccess(`Ujian siswa "${studentName}" berhasil di-reset. Ujian dikosongkan dan siswa mengerjakan dari awal.`);
   };
 
   return (
@@ -2439,6 +2452,21 @@ export default function GuruPanel({
             <div className="flex items-center gap-2">
               <span className="text-xs text-slate-500 font-semibold">Ujian:</span>
               <strong className="text-xs text-slate-800">{selectedExam?.title}</strong>
+              {allExamAttempts.some(a => a.status === 'in_progress') && (
+                <button
+                  onClick={() => setDeleteConfirm({
+                    isOpen: true,
+                    id: 'all',
+                    title: 'Semua Ujian yang Berlangsung',
+                    type: 'force_submit_all',
+                    subtitle: 'Paksa Pengumpulan Seluruh Ujian',
+                  })}
+                  className="ml-4 px-3 py-1.5 bg-amber-500 hover:bg-amber-600 text-white rounded-xl text-[11px] font-bold cursor-pointer transition shadow-sm flex items-center gap-1.5"
+                >
+                  <Clock className="w-3.5 h-3.5" />
+                  Kumpulkan Semua Ujian
+                </button>
+              )}
             </div>
           </div>
 
@@ -2531,16 +2559,38 @@ export default function GuruPanel({
                                   Kumpulkan
                                 </button>
                               )}
-                              {(att.status === 'violation_disqualified' || att.violationCount > 0) && (
-                                <button
-                                  type="button"
-                                  onClick={() => handleResetStudentExam(att.id, att.studentName)}
-                                  className="px-3 py-1.5 bg-rose-600 hover:bg-rose-700 active:scale-95 text-white rounded-xl text-xs font-extrabold cursor-pointer transition shadow-sm flex items-center gap-1.5"
-                                  title="Reset untuk membuka kembali ujian siswa yang terdampak pelanggaran"
-                                >
-                                  <RotateCcw className="w-3.5 h-3.5" />
-                                  <span>Reset</span>
-                                </button>
+                              {(att.status === 'violation_disqualified' || att.status === 'in_progress') && (
+                                <>
+                                  <button
+                                    type="button"
+                                    onClick={() => setDeleteConfirm({
+                                      isOpen: true,
+                                      id: att.id,
+                                      title: att.studentName,
+                                      type: 'resume_attempt',
+                                      subtitle: 'Lanjutkan Sesi',
+                                    })}
+                                    className="px-2.5 py-1 bg-blue-600 hover:bg-blue-700 active:scale-95 text-white rounded-lg text-[10px] font-bold cursor-pointer transition shadow-2xs"
+                                    title="Izinkan siswa melanjutkan ujian tanpa menghapus jawaban sebelumnya"
+                                  >
+                                    Lanjutkan
+                                  </button>
+                                  <button
+                                    type="button"
+                                    onClick={() => setDeleteConfirm({
+                                      isOpen: true,
+                                      id: att.id,
+                                      title: att.studentName,
+                                      type: 'reset_attempt',
+                                      subtitle: 'Reset Sesi Ujian',
+                                    })}
+                                    className="px-2.5 py-1 bg-rose-600 hover:bg-rose-700 active:scale-95 text-white rounded-lg text-[10px] font-bold cursor-pointer transition shadow-2xs flex items-center gap-1"
+                                    title="Reset ujian dari awal (Hapus semua jawaban)"
+                                  >
+                                    <RotateCcw className="w-3 h-3" />
+                                    <span>Reset</span>
+                                  </button>
+                                </>
                               )}
                               {att.status === 'submitted' && att.violationCount === 0 && (
                                 <span className="text-[11px] text-slate-400 italic">Selesai</span>
@@ -4910,13 +4960,17 @@ export default function GuruPanel({
             <div className="flex items-start gap-4">
               <div
                 className={`w-12 h-12 rounded-2xl flex items-center justify-center shrink-0 ${
-                  deleteConfirm.type === 'force_submit'
+                  deleteConfirm.type === 'force_submit' || deleteConfirm.type === 'force_submit_all'
                     ? 'bg-amber-100 text-amber-600'
+                    : deleteConfirm.type === 'resume_attempt'
+                    ? 'bg-blue-100 text-blue-600'
                     : 'bg-rose-100 text-rose-600'
                 }`}
               >
-                {deleteConfirm.type === 'force_submit' ? (
+                {deleteConfirm.type === 'force_submit' || deleteConfirm.type === 'force_submit_all' ? (
                   <Clock className="w-6 h-6 text-amber-600" />
+                ) : deleteConfirm.type === 'resume_attempt' ? (
+                  <CheckCircle className="w-6 h-6 text-blue-600" />
                 ) : (
                   <Trash2 className="w-6 h-6 text-rose-600" />
                 )}
@@ -4925,6 +4979,12 @@ export default function GuruPanel({
                 <h3 className="font-extrabold text-base text-slate-900 leading-tight">
                   {deleteConfirm.type === 'force_submit'
                     ? 'Konfirmasi Kumpulkan Ujian Siswa'
+                    : deleteConfirm.type === 'force_submit_all'
+                    ? 'Kumpulkan Semua Ujian'
+                    : deleteConfirm.type === 'reset_attempt'
+                    ? 'Reset Ujian Siswa'
+                    : deleteConfirm.type === 'resume_attempt'
+                    ? 'Lanjutkan Ujian Siswa'
                     : deleteConfirm.type === 'exam'
                     ? 'Konfirmasi Hapus Paket Ujian'
                     : 'Konfirmasi Hapus Butir Soal'}
@@ -4933,37 +4993,53 @@ export default function GuruPanel({
                   {deleteConfirm.type === 'force_submit' ? (
                     <>
                       Apakah Anda yakin ingin menghentikan dan memaksa pengumpulan lembar ujian siswa{' '}
-                      <strong className="text-slate-900 font-semibold underline decoration-amber-400">
-                        "{deleteConfirm.title}"
-                      </strong>
-                      ?
+                      <strong className="text-slate-900 font-semibold underline decoration-amber-400">"{deleteConfirm.title}"</strong>?
+                    </>
+                  ) : deleteConfirm.type === 'force_submit_all' ? (
+                    <>
+                      Apakah Anda yakin ingin memaksa kumpul <strong>SEMUA</strong> ujian yang masih berstatus "Sedang Mengerjakan"?
+                    </>
+                  ) : deleteConfirm.type === 'reset_attempt' ? (
+                    <>
+                      Apakah Anda yakin ingin mereset ujian siswa <strong className="text-slate-900 font-semibold underline decoration-rose-400">"{deleteConfirm.title}"</strong>? Seluruh jawaban sebelumnya akan dihapus secara permanen.
+                    </>
+                  ) : deleteConfirm.type === 'resume_attempt' ? (
+                    <>
+                      Siswa <strong className="text-slate-900 font-semibold underline decoration-blue-400">"{deleteConfirm.title}"</strong> akan dapat melanjutkan ujian. Jawaban yang sudah diisi tidak akan dihapus.
                     </>
                   ) : (
                     <>
                       Apakah Anda yakin ingin menghapus {deleteConfirm.subtitle || 'data'}{' '}
-                      <strong className="text-slate-900 font-semibold underline decoration-rose-400">
-                        "{deleteConfirm.title}"
-                      </strong>
-                      ?
+                      <strong className="text-slate-900 font-semibold underline decoration-rose-400">"{deleteConfirm.title}"</strong>?
                     </>
                   )}
                 </p>
 
                 <div
                   className={`mt-3 p-3 rounded-xl text-[11px] font-medium flex items-center gap-2 border ${
-                    deleteConfirm.type === 'force_submit'
+                    deleteConfirm.type === 'force_submit' || deleteConfirm.type === 'force_submit_all'
                       ? 'bg-amber-50/90 border-amber-200 text-amber-800'
+                      : deleteConfirm.type === 'resume_attempt'
+                      ? 'bg-blue-50/90 border-blue-200 text-blue-800'
                       : 'bg-rose-50/90 border-rose-200 text-rose-700'
                   }`}
                 >
                   <AlertTriangle
                     className={`w-4 h-4 shrink-0 ${
-                      deleteConfirm.type === 'force_submit' ? 'text-amber-500' : 'text-rose-500'
+                      deleteConfirm.type === 'force_submit' || deleteConfirm.type === 'force_submit_all'
+                        ? 'text-amber-500' 
+                        : deleteConfirm.type === 'resume_attempt'
+                        ? 'text-blue-500'
+                        : 'text-rose-500'
                     }`}
                   />
                   <span>
-                    {deleteConfirm.type === 'force_submit'
+                    {deleteConfirm.type === 'force_submit' || deleteConfirm.type === 'force_submit_all'
                       ? 'Lembar jawaban siswa akan langsung tersimpan & siswa tidak dapat melanjutkan ujian.'
+                      : deleteConfirm.type === 'reset_attempt'
+                      ? 'Data jawaban siswa akan direset, siswa mengulang dari awal.'
+                      : deleteConfirm.type === 'resume_attempt'
+                      ? 'Status pelanggaran akan direset menjadi 0, ujian kembali aktif.'
                       : 'Tindakan ini bersifat permanen dan data yang dihapus tidak dapat dipulihkan.'}
                   </span>
                 </div>
@@ -4973,37 +5049,41 @@ export default function GuruPanel({
             <div className="mt-6 pt-4 border-t border-slate-100 flex items-center justify-end gap-2.5">
               <button
                 type="button"
-                onClick={() =>
-                  setDeleteConfirm({
-                    isOpen: false,
-                    id: '',
-                    title: '',
-                    type: 'exam',
-                  })
-                }
-                className="px-4 py-2.5 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-xl text-xs font-bold transition cursor-pointer"
+                onClick={() => setDeleteConfirm({ isOpen: false, id: '', title: '', type: 'exam' })}
+                className="px-4 py-2 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-xl text-xs font-semibold cursor-pointer transition"
               >
-                Batalkan
+                Batal
               </button>
               <button
                 type="button"
-                id="btn-guru-confirm-action"
                 onClick={executeDelete}
-                className={`px-4 py-2.5 text-white rounded-xl text-xs font-bold transition cursor-pointer shadow-sm flex items-center gap-1.5 ${
-                  deleteConfirm.type === 'force_submit'
+                className={`px-4 py-2 text-white rounded-xl text-xs font-extrabold flex items-center gap-2 cursor-pointer transition shadow-xs ${
+                  deleteConfirm.type === 'force_submit' || deleteConfirm.type === 'force_submit_all'
                     ? 'bg-amber-600 hover:bg-amber-700'
+                    : deleteConfirm.type === 'resume_attempt'
+                    ? 'bg-blue-600 hover:bg-blue-700'
                     : 'bg-rose-600 hover:bg-rose-700'
                 }`}
               >
-                {deleteConfirm.type === 'force_submit' ? (
+                {deleteConfirm.type === 'force_submit' || deleteConfirm.type === 'force_submit_all' ? (
                   <>
                     <CheckCircle className="w-4 h-4" />
-                    <span>Ya, Kumpulkan Sekarang</span>
+                    <span>Ya, Kumpulkan</span>
+                  </>
+                ) : deleteConfirm.type === 'resume_attempt' ? (
+                  <>
+                    <CheckCircle className="w-4 h-4" />
+                    <span>Ya, Lanjutkan</span>
+                  </>
+                ) : deleteConfirm.type === 'reset_attempt' ? (
+                  <>
+                    <RotateCcw className="w-4 h-4" />
+                    <span>Ya, Reset Ujian</span>
                   </>
                 ) : (
                   <>
                     <Trash2 className="w-4 h-4" />
-                    <span>Ya, Hapus Sekarang</span>
+                    <span>Ya, Hapus</span>
                   </>
                 )}
               </button>
@@ -5011,52 +5091,6 @@ export default function GuruPanel({
           </div>
         </div>
       )}
-
-      {/* ========================================================= */}
-      {/* FLOATING TOAST NOTIFICATIONS (GURU / PENGAWAS)             */}
-      {/* ========================================================= */}
-      <div className="fixed top-5 right-5 z-50 flex flex-col gap-2.5 max-w-sm w-full pointer-events-none">
-        {toasts.map((toast) => (
-          <div
-            key={toast.id}
-            className={`pointer-events-auto p-4 rounded-2xl shadow-xl border flex items-start gap-3 transition-all duration-300 transform translate-y-0 ${
-              toast.type === 'delete'
-                ? 'bg-rose-900/95 text-white border-rose-700 shadow-rose-900/20'
-                : toast.type === 'error'
-                ? 'bg-amber-900/95 text-white border-amber-700 shadow-amber-900/20'
-                : 'bg-slate-900/95 text-white border-slate-700 shadow-slate-900/20'
-            }`}
-          >
-            <div className="mt-0.5 shrink-0">
-              {toast.type === 'delete' ? (
-                <div className="w-7 h-7 rounded-lg bg-rose-500/30 border border-rose-400/40 flex items-center justify-center">
-                  <Trash2 className="w-4 h-4 text-rose-300" />
-                </div>
-              ) : toast.type === 'error' ? (
-                <div className="w-7 h-7 rounded-lg bg-amber-500/30 border border-amber-400/40 flex items-center justify-center">
-                  <AlertCircle className="w-4 h-4 text-amber-300" />
-                </div>
-              ) : (
-                <div className="w-7 h-7 rounded-lg bg-emerald-500/30 border border-emerald-400/40 flex items-center justify-center">
-                  <CheckCircle2 className="w-4 h-4 text-emerald-300" />
-                </div>
-              )}
-            </div>
-
-            <div className="flex-1 min-w-0 pr-1">
-              <h4 className="text-xs font-bold tracking-tight text-white">{toast.title}</h4>
-              <p className="text-[11px] text-slate-200 mt-0.5 leading-snug">{toast.message}</p>
-            </div>
-
-            <button
-              onClick={() => setToasts((prev) => prev.filter((t) => t.id !== toast.id))}
-              className="text-slate-400 hover:text-white p-1 rounded-lg transition shrink-0 cursor-pointer"
-            >
-              <X className="w-3.5 h-3.5" />
-            </button>
-          </div>
-        ))}
-      </div>
     </div>
   );
 }
