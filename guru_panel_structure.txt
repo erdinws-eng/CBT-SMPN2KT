@@ -1,0 +1,201 @@
+1007:    <div id="guru-panel-layout" className="min-h-screen bg-slate-50 flex">
+1008-      {/* Mobile Drawer Overlay */}
+1009-      {isSidebarOpen && (
+1010-        <div
+1011-          onClick={() => setIsSidebarOpen(false)}
+1012-          className="fixed inset-0 bg-slate-950/60 z-40 lg:hidden backdrop-blur-xs transition-opacity"
+1013-        />
+1014-      )}
+1015-
+1016-      {/* Collapsible Sidebar (mirip panel admin) */}
+1017-      <aside
+1018-        className={`fixed top-0 bottom-0 left-0 z-50 bg-slate-900 text-slate-300 transition-all duration-300 ease-in-out flex flex-col justify-between border-r border-slate-800 ${
+1019-          isSidebarOpen ? 'w-64 translate-x-0' : '-translate-x-full lg:translate-x-0 lg:w-20'
+1020-        }`}
+1021-      >
+1022-        {/* Sidebar Top: Logo & Title */}
+1023-        <div>
+1024-          <div className="h-16 flex items-center justify-between px-4 border-b border-slate-800">
+1025-            <div className="flex items-center gap-3 overflow-hidden">
+1026-              {settings.logoUrl ? (
+1027-                <div className="w-10 h-10 flex items-center justify-center shrink-0">
+1028-                  <img
+1029-                    src={settings.logoUrl}
+1030-                    alt="Logo Sekolah"
+1031-                    className="w-full h-full object-contain"
+1032-                  />
+1033-                </div>
+1034-              ) : (
+1035-                <div className="w-10 h-10 rounded-xl bg-gradient-to-tr from-indigo-600 to-indigo-700 flex items-center justify-center text-white shrink-0 shadow-md shadow-indigo-950/50">
+1036-                  <School className="w-5 h-5" />
+1037-                </div>
+1038-              )}
+1039-              {isSidebarOpen && (
+1040-                <div className="min-w-0 transition-opacity">
+1041-                  <span className="font-black text-white text-sm tracking-tight block truncate">
+1042-                    {settings.appName || 'SMART CBT'}
+1043-                  </span>
+1044-                  <span className="text-[10px] text-indigo-400 font-bold block uppercase tracking-wider truncate">
+1045-                    Panel Guru & Pengawas
+1046-                  </span>
+1047-                </div>
+1048-              )}
+1049-            </div>
+1050-            {/* Close button on mobile */}
+1051-            <button
+1052-              onClick={() => setIsSidebarOpen(false)}
+1053-              className="p-1.5 text-slate-400 hover:text-white rounded-lg lg:hidden cursor-pointer"
+1054-              title="Tutup Menu"
+1055-            >
+1056-              <X className="w-5 h-5" />
+1057-            </button>
+1058-          </div>
+1059-
+1060-          {/* Navigation Links */}
+1061-          <nav className="p-3 space-y-1.5 text-xs font-semibold">
+1062-            {/* Menu Dashboard */}
+1063-            <button
+1064-              id="menu-sidebar-guru-dashboard"
+1065-              onClick={() => {
+1066-                setActiveTab('dashboard');
+1067-                if (window.innerWidth < 1024) setIsSidebarOpen(false);
+1068-              }}
+1069-              className={`w-full flex items-center gap-3 px-3 py-2.5 rounded-xl transition cursor-pointer ${
+1070-                activeTab === 'dashboard'
+1071-                  ? 'bg-white text-slate-900 font-extrabold shadow-sm'
+1072-                  : 'text-slate-300 hover:bg-slate-800/80 hover:text-white font-medium'
+1073-              }`}
+1074-              title="Dashboard"
+1075-            >
+1076-              <LayoutDashboard className={`w-5 h-5 shrink-0 ${activeTab === 'dashboard' ? 'text-slate-900' : 'text-slate-400'}`} />
+1077-              {isSidebarOpen && <span className="truncate">Dashboard</span>}
+1078-            </button>
+1079-
+1080-            {/* Menu Jadwal Ujian */}
+1081-            <button
+1082-              id="menu-sidebar-guru-jadwal"
+1083-              onClick={() => {
+1084-                setActiveTab('jadwal');
+1085-                if (window.innerWidth < 1024) setIsSidebarOpen(false);
+1086-              }}
+1087-              className={`w-full flex items-center gap-3 px-3 py-2.5 rounded-xl transition cursor-pointer ${
+1088-                activeTab === 'jadwal'
+1089-                  ? 'bg-white text-slate-900 font-extrabold shadow-sm'
+1090-                  : 'text-slate-300 hover:bg-slate-800/80 hover:text-white font-medium'
+1091-              }`}
+1092-              title="Manajemen Jadwal Ujian"
+1093-            >
+1094-              <Calendar className={`w-5 h-5 shrink-0 ${activeTab === 'jadwal' ? 'text-slate-900' : 'text-slate-400'}`} />
+1095-              {isSidebarOpen && <span className="truncate">Jadwal Ujian</span>}
+1096-            </button>
+1097-
+1098-            {/* Menu Bank Soal */}
+1099-            <button
+1100-              id="menu-sidebar-guru-bank-soal"
+1101-              onClick={() => {
+1102-                setActiveTab('bank_soal');
+1103-                if (window.innerWidth < 1024) setIsSidebarOpen(false);
+1104-              }}
+1105-              className={`w-full flex items-center gap-3 px-3 py-2.5 rounded-xl transition cursor-pointer ${
+1106-                activeTab === 'bank_soal'
+1107-                  ? 'bg-white text-slate-900 font-extrabold shadow-sm'
+1108-                  : 'text-slate-300 hover:bg-slate-800/80 hover:text-white font-medium'
+1109-              }`}
+1110-              title="Bank Soal"
+1111-            >
+1112-              <BookOpen className={`w-5 h-5 shrink-0 ${activeTab === 'bank_soal' ? 'text-slate-900' : 'text-slate-400'}`} />
+1113-              {isSidebarOpen && <span className="truncate">Bank Soal</span>}
+1114-            </button>
+1115-
+1116-            {/* Menu Riwayat Siswa */}
+1117-            <button
+1118-              id="menu-sidebar-guru-riwayat"
+1119-              onClick={() => {
+1120-                setActiveTab('riwayat_siswa');
+1121-                if (window.innerWidth < 1024) setIsSidebarOpen(false);
+1122-              }}
+1123-              className={`w-full flex items-center gap-3 px-3 py-2.5 rounded-xl transition cursor-pointer ${
+1124-                activeTab === 'riwayat_siswa'
+1125-                  ? 'bg-white text-slate-900 font-extrabold shadow-sm'
+1126-                  : 'text-slate-300 hover:bg-slate-800/80 hover:text-white font-medium'
+1127-              }`}
+1128-              title="Riwayat Ujian Siswa"
+1129-            >
+1130-              <History className={`w-5 h-5 shrink-0 ${activeTab === 'riwayat_siswa' ? 'text-slate-900' : 'text-slate-400'}`} />
+1131-              {isSidebarOpen && <span className="truncate">Riwayat Ujian Siswa</span>}
+1132-            </button>
+1133-
+1134-            {/* Menu Evaluasi Soal */}
+1135-            <button
+1136-              id="menu-sidebar-guru-evaluasi"
+1137-              onClick={() => {
+1138-                setActiveTab('evaluasi');
+1139-                if (window.innerWidth < 1024) setIsSidebarOpen(false);
+1140-              }}
+1141-              className={`w-full flex items-center gap-3 px-3 py-2.5 rounded-xl transition cursor-pointer ${
+1142-                activeTab === 'evaluasi'
+1143-                  ? 'bg-white text-slate-900 font-extrabold shadow-sm'
+1144-                  : 'text-slate-300 hover:bg-slate-800/80 hover:text-white font-medium'
+1145-              }`}
+1146-              title="Evaluasi Soal"
+1147-            >
+1148-              <ClipboardCheck className={`w-5 h-5 shrink-0 ${activeTab === 'evaluasi' ? 'text-slate-900' : 'text-slate-400'}`} />
+1149-              {isSidebarOpen && <span className="truncate">Evaluasi Soal</span>}
+1150-            </button>
+1151-
+1152-            {/* Menu Rekap & Laporan */}
+1153-            <button
+1154-              id="menu-sidebar-guru-rekap"
+1155-              onClick={() => {
+1156-                setActiveTab('rekap');
+1157-                if (window.innerWidth < 1024) setIsSidebarOpen(false);
+1158-              }}
+1159-              className={`w-full flex items-center gap-3 px-3 py-2.5 rounded-xl transition cursor-pointer ${
+1160-                activeTab === 'rekap'
+1161-                  ? 'bg-white text-slate-900 font-extrabold shadow-sm'
+1162-                  : 'text-slate-300 hover:bg-slate-800/80 hover:text-white font-medium'
+1163-              }`}
+1164-              title="Rekap & Laporan Nilai"
+1165-            >
+1166-              <Award className={`w-5 h-5 shrink-0 ${activeTab === 'rekap' ? 'text-slate-900' : 'text-slate-400'}`} />
+1167-              {isSidebarOpen && <span className="truncate">Rekap & Laporan</span>}
+1168-            </button>
+1169-          </nav>
+1170-        </div>
+1171-      </aside>
+1172-
+1173-      {/* Main Content Column */}
+1174-      <div className={`flex-1 flex flex-col min-w-0 transition-all duration-300 ${isSidebarOpen ? 'lg:pl-64' : 'lg:pl-20'}`}>
+1175-        {/* Guru Topbar */}
+1176-        <header className="sticky top-0 z-30 bg-white/95 backdrop-blur-md border-b border-slate-200 py-3 min-h-[4rem] px-4 sm:px-6 flex items-center justify-between shadow-2xs">
+1177-          <div className="flex items-center gap-3 min-w-0">
+1178-            {/* Hamburger Button untuk Buka Tutup Sidebar */}
+1179-            <button
+1180-              id="btn-toggle-guru-sidebar"
+1181-              onClick={() => setIsSidebarOpen(!isSidebarOpen)}
+1182-              className="p-2 text-slate-600 hover:text-slate-900 hover:bg-slate-100 rounded-xl transition cursor-pointer shrink-0"
+1183-              title="Buka / Tutup Sidebar"
+1184-            >
+1185-              <Menu className="w-5 h-5" />
+1186-            </button>
+1187-
+1188-            <div className="min-w-0">
+1189-              <h2 className="font-extrabold text-slate-900 text-sm sm:text-base leading-tight truncate">
+1190-                {activeTab === 'dashboard' && 'Dashboard Guru & Pengawas'}
+1191-                {activeTab === 'jadwal' && 'Manajemen Jadwal Ujian'}
+1192-                {activeTab === 'bank_soal' && 'Bank Soal'}
+1193-                {activeTab === 'rekap' && 'Laporan Nilai & Cetak PDF'}
+1194-                {activeTab === 'evaluasi' && 'Evaluasi Soal'}
+1195-                {activeTab === 'riwayat_siswa' && 'Riwayat & Remedial Siswa'}
+1196-              </h2>
+1197-            </div>
+1198-          </div>
+1199-
+1200-          {/* Sisi Kanan: Profil Guru & Logout */}
+1201-          <div className="flex items-center gap-2 sm:gap-3 shrink-0">
+1202-            {/* Profil Guru */}
+1203-            <div className="px-3 py-2 bg-slate-50 rounded-xl border border-slate-200">
+1204-              <div className="text-right hidden sm:block max-w-[250px]">
+1205-                <div className="text-[10px] text-slate-500 font-semibold truncate leading-tight mb-0.5">
+1206-                  {settings.schoolName}
+1207-                </div>

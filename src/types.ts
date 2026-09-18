@@ -72,6 +72,7 @@ export interface Exam {
   startTime: string; // ISO string or datetime-local
   endTime: string; // ISO string
   durationMinutes: number; // e.g. 60
+  isActive?: boolean; // toggle switch to activate/deactivate exam
   minSubmitMinutes: number; // minimum time before student can submit, e.g. 15
   kkm: number; // Nilai KKM e.g. 75
   allowRetake: boolean; // remedial / pengulangan

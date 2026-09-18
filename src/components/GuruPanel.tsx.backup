@@ -82,18 +82,16 @@ interface GuruPanelProps {
 
 export default function GuruPanel({
   currentUser,
-  exams: allExams,
+  exams,
   subjects,
   students,
-  attempts: allAttempts,
+  attempts,
   settings,
   onUpdateExams,
   onUpdateAttempts,
   onOpenSupabaseModal,
   onLogout,
 }: GuruPanelProps) {
-  const exams = allExams.filter(e => e.teacherId === currentUser.id);
-  const attempts = allAttempts.filter(a => exams.some(e => e.id === a.examId));
   const [isSidebarOpen, setIsSidebarOpen] = useState(true);
   const [activeTab, setActiveTab] = useState<'dashboard' | 'jadwal' | 'bank_soal' | 'rekap' | 'evaluasi' | 'riwayat_siswa'>('dashboard');
   const [searchAttemptQuery, setSearchAttemptQuery] = useState('');
@@ -379,7 +377,7 @@ export default function GuruPanel({
       passedKkm: scorePercentage >= (selectedExam.kkm || 75),
     };
 
-    onUpdateAttempts(allAttempts.map(a => a.id === updatedAttempt.id ? updatedAttempt : a));
+    onUpdateAttempts(attempts.map(a => a.id === updatedAttempt.id ? updatedAttempt : a));
     setEvaluatingAttemptId(null);
     setEvaluatingScores({});
     showToast('Berhasil', 'Evaluasi soal berhasil disimpan dan nilai akhir telah diperbarui.', 'success');
@@ -428,7 +426,7 @@ export default function GuruPanel({
           return { ...g, id: finalId };
         });
 
-        const updatedExams = allExams.map((ex) =>
+        const updatedExams = exams.map((ex) =>
           ex.id === selectedExam.id
             ? { ...ex, questions: [...ex.questions, ...sanitizedGenerated] }
             : ex
@@ -479,7 +477,7 @@ export default function GuruPanel({
         existingIds.add(finalId);
         return { ...p, id: finalId };
       });
-      const updatedExams = allExams.map((ex) =>
+      const updatedExams = exams.map((ex) =>
         ex.id === selectedExam.id
           ? { ...ex, questions: [...ex.questions, ...sanitizedParsed] }
           : ex
@@ -512,7 +510,7 @@ export default function GuruPanel({
         existingIds.add(finalId);
         return { ...p, id: finalId };
       });
-      const updatedExams = allExams.map((ex) =>
+      const updatedExams = exams.map((ex) =>
         ex.id === selectedExam.id
           ? { ...ex, questions: [...ex.questions, ...sanitizedParsed] }
           : ex
@@ -532,7 +530,7 @@ export default function GuruPanel({
     if (deleteConfirm.type === 'exam') {
       const examId = deleteConfirm.id;
       const examTitle = deleteConfirm.title;
-      const updated = allExams.filter((e) => e.id !== examId);
+      const updated = exams.filter((e) => e.id !== examId);
       onUpdateExams(updated);
       if (selectedExamId === examId) {
         setSelectedExamId(updated[0]?.id || '');
@@ -541,7 +539,7 @@ export default function GuruPanel({
     } else if (deleteConfirm.type === 'question') {
       if (selectedExam) {
         const qId = deleteConfirm.id;
-        const updatedExams = allExams.map((ex) =>
+        const updatedExams = exams.map((ex) =>
           ex.id === selectedExam.id
             ? { ...ex, questions: ex.questions.filter((q) => q.id !== qId) }
             : ex
@@ -552,7 +550,7 @@ export default function GuruPanel({
     } else if (deleteConfirm.type === 'force_submit') {
       const attemptId = deleteConfirm.id;
       const studentName = deleteConfirm.title;
-      const updated = allAttempts.map((att) => {
+      const updated = attempts.map((att) => {
         if (att.id === attemptId) {
           return {
             ...att,
@@ -565,7 +563,7 @@ export default function GuruPanel({
       onUpdateAttempts(updated);
       showToast('Ujian Dikumpulkan', `Sesi ujian ${studentName} berhasil dikumpulkan paksa.`, 'delete');
     } else if (deleteConfirm.type === 'force_submit_all') {
-      const updated = allAttempts.map((att) => {
+      const updated = attempts.map((att) => {
         if (att.examId === selectedExam?.id && att.status === 'in_progress') {
           return {
             ...att,
@@ -581,7 +579,7 @@ export default function GuruPanel({
       const attemptId = deleteConfirm.id;
       const studentName = deleteConfirm.title;
       // Mark as submitted and clear answers so it counts as an attempt (dihitung) but student can retake
-      const updated = allAttempts.map((att) => {
+      const updated = attempts.map((att) => {
         if (att.id === attemptId) {
           return {
             ...att,
@@ -601,7 +599,7 @@ export default function GuruPanel({
     } else if (deleteConfirm.type === 'resume_attempt') {
       const attemptId = deleteConfirm.id;
       const studentName = deleteConfirm.title;
-      const updated = allAttempts.map((att) => {
+      const updated = attempts.map((att) => {
         if (att.id === attemptId) {
           return {
             ...att,
@@ -682,7 +680,7 @@ export default function GuruPanel({
       explanation: newQuestionExplanation.trim() || undefined,
     };
 
-    const updatedExams = allExams.map((ex) =>
+    const updatedExams = exams.map((ex) =>
       ex.id === selectedExam.id ? { ...ex, questions: [...ex.questions, newQ] } : ex
     );
     onUpdateExams(updatedExams);
@@ -734,7 +732,7 @@ export default function GuruPanel({
     setIsSavingEditExam(true);
     await new Promise((r) => setTimeout(r, 350));
 
-    const updated = allExams.map((ex) => {
+    const updated = exams.map((ex) => {
       if (ex.id === editingExam.id) {
         return {
           ...ex,
@@ -906,7 +904,7 @@ export default function GuruPanel({
     });
 
     const updatedExam = { ...selectedExam, questions: updatedQuestions };
-    onUpdateExams(allExams.map((ex) => (ex.id === selectedExam.id ? updatedExam : ex)));
+    onUpdateExams(exams.map((ex) => (ex.id === selectedExam.id ? updatedExam : ex)));
     setIsSavingEditQuestion(false);
     setIsEditQuestionModalOpen(false);
     setEditingQuestion(null);
@@ -961,7 +959,7 @@ export default function GuruPanel({
       questions: [],
     };
 
-    onUpdateExams([createdExam, ...allExams]);
+    onUpdateExams([createdExam, ...exams]);
     setSelectedExamId(createdExam.id);
     setIsSavingNewExam(false);
     showToast('Ujian Dibuat', `Paket ujian "${createdExam.title}" berhasil dibuat! Silakan tambahkan butir soal.`, 'success');
@@ -970,10 +968,10 @@ export default function GuruPanel({
 
   // Toggle Release Score
   const handleToggleReleaseScore = (examId: string) => {
-    const target = allExams.find((e) => e.id === examId);
+    const target = exams.find((e) => e.id === examId);
     if (!target) return;
     const newStatus = !target.releaseScore;
-    const updated = allExams.map((e) =>
+    const updated = exams.map((e) =>
       e.id === examId ? { ...e, releaseScore: newStatus } : e
     );
     onUpdateExams(updated);
@@ -982,10 +980,10 @@ export default function GuruPanel({
 
   // Toggle Active Exam
   const handleToggleActiveExam = (examId: string) => {
-    const target = allExams.find((e) => e.id === examId);
+    const target = exams.find((e) => e.id === examId);
     if (!target) return;
     const newStatus = target.isActive === false ? true : false;
-    const updated = allExams.map((e) =>
+    const updated = exams.map((e) =>
       e.id === examId ? { ...e, isActive: newStatus } : e
     );
     onUpdateExams(updated);
@@ -3292,7 +3290,7 @@ export default function GuruPanel({
                 <button
                   id="btn-delete-all-student-attempts"
                   onClick={() => {
-                    const newAttempts = allAttempts.filter(a => !(a.examId === currentExamId && a.studentId === selectedRiwayatStudent.studentId));
+                    const newAttempts = attempts.filter(a => !(a.examId === currentExamId && a.studentId === selectedRiwayatStudent.studentId));
                     onUpdateAttempts(newAttempts);
                     setIsRiwayatModalOpen(false);
                     showToast('Riwayat Siswa Dihapus', `Data riwayat untuk ${selectedRiwayatStudent.studentName} berhasil dihapus.`, 'delete');
@@ -3363,7 +3361,7 @@ export default function GuruPanel({
                           <button
                             id={`btn-confirm-yes-attempt-${att.id}`}
                             onClick={() => {
-                              const newAttempts = allAttempts.filter(a => a.id !== att.id);
+                              const newAttempts = attempts.filter(a => a.id !== att.id);
                               onUpdateAttempts(newAttempts);
                               setConfirmingAttemptId(null);
                               showToast('Percobaan Dihapus', 'Data percobaan ujian berhasil dihapus.', 'delete');
@@ -3455,7 +3453,7 @@ export default function GuruPanel({
                 <button
                   id="btn-confirm-delete-all-riwayat"
                   onClick={() => {
-                    const newAttempts = allAttempts.filter(a => {
+                    const newAttempts = attempts.filter(a => {
                       if (a.examId !== activeExamId) return true;
                       if (activeClass !== 'Semua Kelas' && a.studentClass !== activeClass) return true;
                       return false;
@@ -3517,7 +3515,7 @@ export default function GuruPanel({
                 <button
                   id="btn-confirm-delete-student-row"
                   onClick={() => {
-                    const newAttempts = allAttempts.filter(
+                    const newAttempts = attempts.filter(
                       a => !(a.examId === activeExamId && a.studentId === studentToDeleteFromRiwayat.studentId)
                     );
                     onUpdateAttempts(newAttempts);
@@ -4872,7 +4870,7 @@ export default function GuruPanel({
       {/* IN-APP CONFIRMATION MODAL (NO WINDOW.CONFIRM / IFRAME SAFE) */}
       {/* ========================================================= */}
       {deleteConfirm.isOpen && (
-        <div className="fixed inset-0 z-[60] bg-slate-950/60 backdrop-blur-xs flex items-center justify-center p-4 animate-fadeIn">
+        <div className="fixed inset-0 z-50 bg-slate-950/60 backdrop-blur-xs flex items-center justify-center p-4 animate-fadeIn">
           <div className="bg-white rounded-2xl max-w-md w-full p-6 shadow-2xl border border-slate-200 animate-scaleUp">
             <div className="flex items-start gap-4">
               <div

@@ -208,6 +208,7 @@ export const supabaseService = {
         token: e.token || '',
         questions: e.questions || [],
         status: e.status,
+        isActive: e.status !== 'inactive',
         createdAt: e.created_at || new Date().toISOString(),
       }));
     } catch (err) {
@@ -243,7 +244,7 @@ export const supabaseService = {
         max_violations: exam.maxViolations,
         token: exam.token || '',
         questions: exam.questions,
-        status: exam.status,
+        status: exam.isActive === false ? 'inactive' : 'active',
       });
       return !error;
     } catch (err) {

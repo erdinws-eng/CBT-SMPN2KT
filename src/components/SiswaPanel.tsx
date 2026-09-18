@@ -78,7 +78,7 @@ export default function SiswaPanel({
   // Filter exams for student's class
   const studentClass = currentUser.classGrade || '8A';
   const myExams = exams.filter(
-    (e) => e.targetClasses.includes(studentClass) || e.targetClasses.includes('all')
+    (e) => (e.targetClasses.includes(studentClass) || e.targetClasses.includes('all')) && e.isActive !== false
   );
 
   // Calculate elapsed exam time for minimum submit check
@@ -158,8 +158,11 @@ export default function SiswaPanel({
     };
 
     // Update attempts
-    const otherAttempts = attempts.filter((a) => a.id !== newAttempt.id);
-    onUpdateAttempts([...otherAttempts, newAttempt]);
+    const updatedAttempts = attempts.map(a => a.id === newAttempt.id ? newAttempt : a);
+    if (!attempts.find(a => a.id === newAttempt.id)) {
+        updatedAttempts.push(newAttempt);
+    }
+    onUpdateAttempts(updatedAttempts);
 
     setActiveExam({ ...exam, questions: questionsOrder });
     setCurrentAttempt(newAttempt);
@@ -351,8 +354,11 @@ export default function SiswaPanel({
       setCurrentAttempt(updatedAttempt);
 
       // Sync to main attempts list
-      const otherAttempts = attempts.filter((a) => a.id !== updatedAttempt.id);
-      onUpdateAttempts([...otherAttempts, updatedAttempt]);
+      const updatedAttempts = attempts.map(a => a.id === updatedAttempt.id ? updatedAttempt : a);
+      if (!attempts.find(a => a.id === updatedAttempt.id)) {
+          updatedAttempts.push(updatedAttempt);
+      }
+      onUpdateAttempts(updatedAttempts);
     }
   };
 
@@ -458,8 +464,12 @@ export default function SiswaPanel({
       isGraded: true,
     };
 
-    const otherAttempts = attempts.filter((a) => a.id !== finalAttempt.id);
-    onUpdateAttempts([...otherAttempts, finalAttempt]);
+    const updatedAttempts = attempts.map(a => a.id === finalAttempt.id ? finalAttempt : a);
+    if (!attempts.find(a => a.id === finalAttempt.id)) {
+        updatedAttempts.push(finalAttempt);
+    }
+    
+    onUpdateAttempts(updatedAttempts);
 
     // Release wake lock & fullscreen
     if (wakeLockRef.current) {
