@@ -60,6 +60,7 @@ import {
 import {
   exportExamResultsToExcel,
   downloadTemplateSoalExcel,
+  downloadTemplateSoalWord,
   parseSoalExcel,
   parseDocxTextQuestions,
 } from '../lib/excelExportImport';
@@ -487,7 +488,7 @@ export default function GuruPanel({
       onUpdateExams(updatedExams);
       showSuccess(`Berhasil mengimpor ${sanitizedParsed.length} butir soal dari Excel (.xlsx)!`);
     } catch (err: any) {
-      alert('Gagal membaca Excel: ' + (err?.message || 'Format tidak sesuai'));
+      showToast('Gagal Impor Excel', err?.message || 'Format file Excel tidak sesuai.', 'error');
     }
     e.target.value = '';
   };
@@ -500,7 +501,7 @@ export default function GuruPanel({
     try {
       const parsed = await parseDocxTextQuestions(file);
       if (parsed.length === 0) {
-        alert('Tidak dapat mengekstrak soal dari file ini. Pastikan format teks memuat nomor soal (1. 2. dll).');
+        showToast('Gagal Ekstrak Soal', 'Tidak dapat mengekstrak butir soal. Pastikan setiap soal diawali nomor (1. 2. dll) dan kunci jawaban (Kunci: A).', 'error');
         return;
       }
       const existingIds = new Set(selectedExam.questions.map((q) => q.id));
@@ -520,7 +521,7 @@ export default function GuruPanel({
       onUpdateExams(updatedExams);
       showSuccess(`Berhasil membaca ${sanitizedParsed.length} soal dari dokumen "${file.name}"!`);
     } catch (err: any) {
-      alert('Gagal memproses dokumen: ' + (err?.message || 'Error'));
+      showToast('Gagal Memproses Dokumen', err?.message || 'Gagal membaca isi dokumen.', 'error');
     }
     e.target.value = '';
   };
@@ -2135,11 +2136,24 @@ export default function GuruPanel({
                       {/* Template Word Button */}
                       <a
                         href="/template_soal.docx"
-                        download
-                        className="px-3.5 py-2 bg-white hover:bg-slate-50 text-slate-700 border border-slate-200 rounded-xl text-xs font-semibold flex items-center justify-center gap-2 transition shadow-xs cursor-pointer"
-                        onClick={(e) => {
+                        download="Template_Soal_CBT.docx"
+                        className="px-3.5 py-2 bg-white hover:bg-slate-50 text-slate-700 border border-slate-200 rounded-xl text-xs font-semibold flex items-center justify-center gap-2 transition shadow-xs cursor-pointer active:scale-95"
+                        onClick={async (e) => {
                           e.preventDefault();
-                          alert('File template_soal.docx belum tersedia di public folder. Harap tambahkan file ke dalam folder public.');
+                          try {
+                            await downloadTemplateSoalWord();
+                            showSuccess('Template soal Microsoft Word (.docx) berhasil diunduh!');
+                          } catch (err: any) {
+                            console.error('Word template download error:', err);
+                            // Fallback direct link download
+                            const directLink = document.createElement('a');
+                            directLink.href = '/template_soal.docx';
+                            directLink.download = 'Template_Soal_CBT.docx';
+                            document.body.appendChild(directLink);
+                            directLink.click();
+                            document.body.removeChild(directLink);
+                            showSuccess('Template soal Microsoft Word (.docx) berhasil diunduh!');
+                          }
                         }}
                       >
                         <FileText className="w-4 h-4 text-blue-500" />
