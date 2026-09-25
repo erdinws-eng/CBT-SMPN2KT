@@ -26,6 +26,8 @@ import {
   Menu,
   LayoutDashboard,
   History,
+  Loader2,
+  ShieldCheck,
 } from 'lucide-react';
 import {
   Exam,
@@ -65,6 +67,8 @@ export default function SiswaPanel({
   const [doubtQuestions, setDoubtQuestions] = useState<Record<string, boolean>>({});
   const [remainingSeconds, setRemainingSeconds] = useState<number>(0);
   const [isSubmitConfirmOpen, setIsSubmitConfirmOpen] = useState<boolean>(false);
+  const [isSubmittingExam, setIsSubmittingExam] = useState<boolean>(false);
+  const isSubmittingRef = useRef<boolean>(false);
 
   // Anti-cheat state
   const [violationCount, setViolationCount] = useState<number>(0);
@@ -171,6 +175,8 @@ export default function SiswaPanel({
     setElapsedMinutes(0);
     setViolationCount(0);
     setCurrentQuestionIndex(0);
+    isSubmittingRef.current = false;
+    setIsSubmittingExam(false);
 
     // Request Fullscreen & Anti-dimming screen lock
     requestExamFullScreen();
@@ -234,6 +240,9 @@ export default function SiswaPanel({
     };
 
     const recordViolation = (reason: string, playBeep = false) => {
+      // Abaikan semua deteksi jika siswa sedang dalam proses submit jawaban
+      if (isSubmittingRef.current) return;
+
       if (playBeep) playViolationBeep();
       // Seketika selesaikan ujian saat pelanggaran terjadi (tanpa peringatan 3 kali)
       setViolationCount(1);
@@ -244,18 +253,22 @@ export default function SiswaPanel({
     };
 
     const handleVisibilityChange = () => {
+      if (isSubmittingRef.current) return;
       if (document.hidden) {
         recordViolation('Meninggalkan tab ujian CBT atau membuka aplikasi lain', true);
       }
     };
 
     const handleWindowBlur = () => {
+      if (isSubmittingRef.current) return;
       recordViolation('Kursor atau jendela fokus keluar dari aplikasi CBT', true);
     };
 
     const handleFullscreenChange = () => {
       const isCurrentlyFs = Boolean(document.fullscreenElement);
       setIsFullScreen(isCurrentlyFs);
+      // Jika siswa sedang submit atau jeda pengiriman aktif, jangan anggap pelepasan fullscreen sebagai pelanggaran
+      if (isSubmittingRef.current) return;
       if (!isCurrentlyFs && activeExam.lockdownBrowser) {
         recordViolation('Keluar dari mode Layar Penuh (Fullscreen)');
       }
@@ -263,6 +276,7 @@ export default function SiswaPanel({
 
     // Keyboard protection (Ctrl+C, Ctrl+V, Ctrl+U, PrintScreen, F12)
     const handleKeyDown = (e: KeyboardEvent) => {
+      if (isSubmittingRef.current) return;
       if (
         (e.ctrlKey || e.metaKey) &&
         ['c', 'v', 'u', 'p', 's', 'a'].includes(e.key.toLowerCase())
@@ -278,6 +292,7 @@ export default function SiswaPanel({
 
     // Context menu (Right click) protection
     const handleContextMenu = (e: MouseEvent) => {
+      if (isSubmittingRef.current) return;
       e.preventDefault();
     };
 
@@ -306,7 +321,7 @@ export default function SiswaPanel({
       setRemainingSeconds((prev) => {
         if (prev <= 1) {
           clearInterval(timer);
-          handleFinishExam(false);
+          triggerSubmitExam();
           return 0;
         }
         return prev - 1;
@@ -367,9 +382,38 @@ export default function SiswaPanel({
     setDoubtQuestions((prev) => ({ ...prev, [qId]: !prev[qId] }));
   };
 
-  // 5. Calculate Score and Submit Exam
+  // 5. Submit Exam with Safe 1-2s Delay & Anti-Cheat Protection
+  // Memberi waktu jeda 1 - 2 detik untuk mengirim jawaban sehingga sistem
+  // tidak menganggap keluar mode fullscreen sebagai pelanggaran saat layar HP dimatikan/beralih
+  const triggerSubmitExam = async () => {
+    if (isSubmittingRef.current) return;
+    isSubmittingRef.current = true;
+    setIsSubmittingExam(true);
+
+    // Langsung bebaskan wakeLock dan izinkan transisi fullscreen ponsel secara aman
+    try {
+      if (wakeLockRef.current) {
+        wakeLockRef.current.release?.().catch(() => {});
+      }
+      if (document.fullscreenElement && document.exitFullscreen) {
+        document.exitFullscreen().catch(() => {});
+      }
+    } catch (e) {
+      // Abaikan jika tidak didukung browser
+    }
+
+    // Jeda aman 1.8 detik (1 - 2 detik) untuk transmisi jawaban ke sistem
+    await new Promise((resolve) => setTimeout(resolve, 1800));
+
+    handleFinishExam(false);
+  };
+
+  // Calculate Score and Submit Exam
   const handleFinishExam = (isDisqualified = false) => {
     if (!activeExam || !currentAttempt) return;
+
+    // Pastikan flag submitting aktif agar saat exitFullscreen dipanggil, tidak terpicu event pelanggaran
+    isSubmittingRef.current = true;
 
     let earnedPoints = 0;
     const totalMaxPoints = activeExam.questions.reduce((acc, q) => acc + q.points, 0) || 100;
@@ -491,6 +535,12 @@ export default function SiswaPanel({
     setActiveExam(null);
     setCurrentAttempt(finalAttempt);
     setIsSubmitConfirmOpen(false);
+    setIsSubmittingExam(false);
+
+    // Berikan jeda toleransi 2.5 detik untuk perangkat ponsel agar event blur/fullscreenchange lambat tidak memicu false-violation
+    setTimeout(() => {
+      isSubmittingRef.current = false;
+    }, 2500);
   };
 
   // Helper time format
@@ -1611,50 +1661,78 @@ export default function SiswaPanel({
       {isSubmitConfirmOpen && (
         <div className="fixed inset-0 z-50 bg-slate-900/60 backdrop-blur-xs flex items-center justify-center p-4">
           <div className="bg-white rounded-3xl max-w-md w-full p-6 shadow-2xl border border-slate-200">
-            <div className="w-12 h-12 rounded-2xl bg-indigo-50 text-indigo-700 flex items-center justify-center mx-auto mb-4">
-              <FileCheck className="w-6 h-6" />
-            </div>
+            {isSubmittingExam ? (
+              <div className="text-center py-4 space-y-4">
+                <div className="w-16 h-16 rounded-2xl bg-emerald-50 text-emerald-600 flex items-center justify-center mx-auto shadow-inner">
+                  <Loader2 className="w-8 h-8 animate-spin text-emerald-600" />
+                </div>
+                <div>
+                  <h3 className="text-lg font-black text-slate-900 mb-1">
+                    Mengirim Jawaban Ujian...
+                  </h3>
+                  <p className="text-xs text-slate-500 max-w-xs mx-auto leading-relaxed">
+                    Jawaban Anda sedang diverifikasi dan disimpan ke server. Mohon tunggu sejenak (1–2 detik)...
+                  </p>
+                </div>
 
-            <h3 className="text-lg font-black text-slate-900 text-center mb-1">
-              Konfirmasi Kumpulkan Ujian
-            </h3>
-            <p className="text-xs text-slate-500 text-center mb-4">
-              Periksa kembali kelengkapan jawaban Anda sebelum mengakhiri sesi ujian.
-            </p>
+                {/* Progress bar animation */}
+                <div className="w-full bg-slate-100 rounded-full h-2.5 overflow-hidden">
+                  <div className="bg-emerald-600 h-2.5 rounded-full animate-pulse w-full transition-all duration-1000" />
+                </div>
 
-            <div className="p-3 bg-slate-50 rounded-xl border border-slate-200 text-xs space-y-1.5 mb-6">
-              <div className="flex justify-between">
-                <span className="text-slate-600">Total Butir Soal:</span>
-                <strong className="text-slate-800">{totalQ} Butir</strong>
+                <div className="flex items-center justify-center gap-2 text-[11px] font-semibold text-emerald-700 bg-emerald-50 py-2 px-3 rounded-xl border border-emerald-200">
+                  <ShieldCheck className="w-4 h-4 text-emerald-600 shrink-0" />
+                  <span>Jeda aman aktif: Layar penuh dinonaktifkan tanpa pelanggaran</span>
+                </div>
               </div>
-              <div className="flex justify-between">
-                <span className="text-slate-600">Sudah Dijawab:</span>
-                <strong className="text-emerald-700">{Object.keys(userAnswers).length} Soal</strong>
-              </div>
-              <div className="flex justify-between">
-                <span className="text-slate-600">Ditandai Ragu-ragu:</span>
-                <strong className="text-amber-700">
-                  {Object.values(doubtQuestions).filter(Boolean).length} Soal
-                </strong>
-              </div>
-            </div>
+            ) : (
+              <>
+                <div className="w-12 h-12 rounded-2xl bg-indigo-50 text-indigo-700 flex items-center justify-center mx-auto mb-4">
+                  <FileCheck className="w-6 h-6" />
+                </div>
 
-            <div className="grid grid-cols-2 gap-3">
-              <button
-                type="button"
-                onClick={() => setIsSubmitConfirmOpen(false)}
-                className="py-2.5 px-4 bg-slate-100 hover:bg-slate-200 text-slate-700 font-bold rounded-xl text-xs cursor-pointer"
-              >
-                Cek Jawaban Lagi
-              </button>
-              <button
-                type="button"
-                onClick={() => handleFinishExam(false)}
-                className="py-2.5 px-4 bg-emerald-600 hover:bg-emerald-700 text-white font-extrabold rounded-xl text-xs shadow-sm cursor-pointer"
-              >
-                Ya, Kumpulkan Sekarang
-              </button>
-            </div>
+                <h3 className="text-lg font-black text-slate-900 text-center mb-1">
+                  Konfirmasi Kumpulkan Ujian
+                </h3>
+                <p className="text-xs text-slate-500 text-center mb-4">
+                  Periksa kembali kelengkapan jawaban Anda sebelum mengakhiri sesi ujian.
+                </p>
+
+                <div className="p-3 bg-slate-50 rounded-xl border border-slate-200 text-xs space-y-1.5 mb-6">
+                  <div className="flex justify-between">
+                    <span className="text-slate-600">Total Butir Soal:</span>
+                    <strong className="text-slate-800">{totalQ} Butir</strong>
+                  </div>
+                  <div className="flex justify-between">
+                    <span className="text-slate-600">Sudah Dijawab:</span>
+                    <strong className="text-emerald-700">{Object.keys(userAnswers).length} Soal</strong>
+                  </div>
+                  <div className="flex justify-between">
+                    <span className="text-slate-600">Ditandai Ragu-ragu:</span>
+                    <strong className="text-amber-700">
+                      {Object.values(doubtQuestions).filter(Boolean).length} Soal
+                    </strong>
+                  </div>
+                </div>
+
+                <div className="grid grid-cols-2 gap-3">
+                  <button
+                    type="button"
+                    onClick={() => setIsSubmitConfirmOpen(false)}
+                    className="py-2.5 px-4 bg-slate-100 hover:bg-slate-200 text-slate-700 font-bold rounded-xl text-xs cursor-pointer"
+                  >
+                    Cek Jawaban Lagi
+                  </button>
+                  <button
+                    type="button"
+                    onClick={triggerSubmitExam}
+                    className="py-2.5 px-4 bg-emerald-600 hover:bg-emerald-700 text-white font-extrabold rounded-xl text-xs shadow-sm cursor-pointer flex items-center justify-center gap-1.5"
+                  >
+                    <span>Ya, Kumpulkan Sekarang</span>
+                  </button>
+                </div>
+              </>
+            )}
           </div>
         </div>
       )}
