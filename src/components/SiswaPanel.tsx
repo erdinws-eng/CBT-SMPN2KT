@@ -28,6 +28,8 @@ import {
   History,
   Loader2,
   ShieldCheck,
+  Info,
+  LayoutGrid,
 } from 'lucide-react';
 import {
   Exam,
@@ -69,6 +71,8 @@ export default function SiswaPanel({
   const [isSubmitConfirmOpen, setIsSubmitConfirmOpen] = useState<boolean>(false);
   const [isSubmittingExam, setIsSubmittingExam] = useState<boolean>(false);
   const isSubmittingRef = useRef<boolean>(false);
+  const [isQuestionInfoOpen, setIsQuestionInfoOpen] = useState<boolean>(false);
+  const [isQuestionListOpen, setIsQuestionListOpen] = useState<boolean>(true);
 
   // Anti-cheat state
   const [violationCount, setViolationCount] = useState<number>(0);
@@ -177,6 +181,8 @@ export default function SiswaPanel({
     setCurrentQuestionIndex(0);
     isSubmittingRef.current = false;
     setIsSubmittingExam(false);
+    setIsQuestionInfoOpen(false);
+    setIsQuestionListOpen(true);
 
     // Request Fullscreen & Anti-dimming screen lock
     requestExamFullScreen();
@@ -216,40 +222,47 @@ export default function SiswaPanel({
         const ctx = new AudioContext();
         let startTime = ctx.currentTime;
         
-        for (let i = 0; i < 3; i++) {
+        // Bunyi alarm bip keras 4 kali selama 1.3 - 1.5 detik
+        for (let i = 0; i < 4; i++) {
           const osc = ctx.createOscillator();
           const gain = ctx.createGain();
           
-          osc.type = 'square';
-          osc.frequency.setValueAtTime(800, startTime); // 800Hz beep
+          osc.type = 'sawtooth';
+          osc.frequency.setValueAtTime(880, startTime); // 880Hz alert frequency
           
-          gain.gain.setValueAtTime(0.1, startTime);
-          gain.gain.exponentialRampToValueAtTime(0.01, startTime + 0.2);
+          gain.gain.setValueAtTime(0.25, startTime);
+          gain.gain.exponentialRampToValueAtTime(0.01, startTime + 0.25);
           
           osc.connect(gain);
           gain.connect(ctx.destination);
           
           osc.start(startTime);
-          osc.stop(startTime + 0.2);
+          osc.stop(startTime + 0.25);
           
-          startTime += 0.3;
+          startTime += 0.35;
         }
       } catch (e) {
         console.error('Audio beep failed', e);
       }
     };
 
-    const recordViolation = (reason: string, playBeep = false) => {
-      // Abaikan semua deteksi jika siswa sedang dalam proses submit jawaban
+    const recordViolation = (reason: string, playBeep = true) => {
+      // Abaikan semua deteksi jika siswa sedang dalam proses submit jawaban atau pelanggaran sudah aktif
       if (isSubmittingRef.current) return;
+      isSubmittingRef.current = true; // Kunci segera agar tidak terpicu event berulang
 
       if (playBeep) playViolationBeep();
-      // Seketika selesaikan ujian saat pelanggaran terjadi (tanpa peringatan 3 kali)
+
+      // Seketika catat pelanggaran dan tampilkan jendela modal pelanggaran
       setViolationCount(1);
       setViolationWarningModal(
         `UJIAN DIHENTIKAN OTOMATIS KARENA PELANGGARAN!\n\nTerdeteksi: ${reason}.\nSesuai aturan ujian, jika terjadi pelanggaran maka ujian otomatis selesai tanpa peringatan sampai 3 kali.\n\nJika pelanggaran terjadi tanpa sengaja, silakan segera lapor ke Pengawas/Guru untuk melakukan "Reset Ujian Siswa" agar Anda dapat membuka dan mengerjakan kembali.`
       );
-      handleFinishExam(true);
+
+      // Muncul jendela modal pelanggaran dan bunyi bip selama 1 - 1,5 detik, baru kemudian tampilan berpindah ke panel siswa
+      setTimeout(() => {
+        handleFinishExam(true);
+      }, 1500);
     };
 
     const handleVisibilityChange = () => {
@@ -270,7 +283,7 @@ export default function SiswaPanel({
       // Jika siswa sedang submit atau jeda pengiriman aktif, jangan anggap pelepasan fullscreen sebagai pelanggaran
       if (isSubmittingRef.current) return;
       if (!isCurrentlyFs && activeExam.lockdownBrowser) {
-        recordViolation('Keluar dari mode Layar Penuh (Fullscreen)');
+        recordViolation('Keluar dari mode Layar Penuh (Fullscreen)', true);
       }
     };
 
@@ -282,11 +295,11 @@ export default function SiswaPanel({
         ['c', 'v', 'u', 'p', 's', 'a'].includes(e.key.toLowerCase())
       ) {
         e.preventDefault();
-        recordViolation(`Menekan tombol pintasan keyboard terlarang (Ctrl+${e.key.toUpperCase()})`);
+        recordViolation(`Menekan tombol pintasan keyboard terlarang (Ctrl+${e.key.toUpperCase()})`, true);
       }
       if (e.key === 'PrintScreen' || e.key === 'F12') {
         e.preventDefault();
-        recordViolation('Mencoba mengambil tangkapan layar atau membuka inspeksi');
+        recordViolation('Mencoba mengambil tangkapan layar atau membuka inspeksi', true);
       }
     };
 
@@ -911,6 +924,42 @@ export default function SiswaPanel({
             )}
           </main>
         </div>
+
+        {/* MODAL PELANGGARAN KECURANGAN PADA BERANDA PANEL SISWA */}
+        {violationWarningModal && (
+          <div className="fixed inset-0 z-50 bg-slate-900/85 backdrop-blur-md flex items-center justify-center p-4">
+            <div className="bg-white rounded-3xl max-w-md w-full p-6 text-center shadow-2xl border-4 border-rose-500 animate-in fade-in zoom-in duration-200">
+              <div className="w-16 h-16 rounded-full bg-rose-100 text-rose-600 flex items-center justify-center mx-auto mb-4 animate-bounce">
+                <ShieldAlert className="w-9 h-9" />
+              </div>
+
+              <h3 className="text-xl font-black text-slate-900 mb-2">
+                UJIAN DIHENTIKAN OTOMATIS!
+              </h3>
+
+              <p className="text-xs text-rose-700 font-bold whitespace-pre-line leading-relaxed mb-4 bg-rose-50 p-3.5 rounded-xl border border-rose-200 text-left">
+                {violationWarningModal}
+              </p>
+
+              <div className="p-3 bg-amber-50 rounded-xl border border-amber-200 text-[11px] text-amber-900 text-left mb-6 space-y-1">
+                <strong className="block font-bold text-amber-950">
+                  Pemberitahuan untuk Siswa:
+                </strong>
+                <span>
+                  Apabila pelanggaran ini terjadi tanpa sengaja (misalnya popup sistem operasi atau kendala perangkat), silakan segera lapor ke Pengawas/Guru di ruangan ujian. Pengawas dapat melakukan <strong>Buka Kunci (Lanjut)</strong> atau <strong>Reset Ujian Siswa</strong> agar Anda bisa membuka dan mengerjakan kembali.
+                </span>
+              </div>
+
+              <button
+                type="button"
+                onClick={() => setViolationWarningModal(null)}
+                className="w-full py-3 bg-slate-800 hover:bg-slate-900 text-white rounded-xl font-extrabold text-xs shadow-md transition cursor-pointer"
+              >
+                Tutup & Kembali ke Beranda Siswa
+              </button>
+            </div>
+          </div>
+        )}
       </div>
     );
   }
@@ -985,33 +1034,93 @@ export default function SiswaPanel({
       {/* Main Content Area */}
       <div className="flex-1 max-w-7xl mx-auto w-full p-4 sm:p-6 grid grid-cols-1 lg:grid-cols-12 gap-6 overflow-y-auto items-start">
         {/* Left Column: Question Stimulus & Answer Area */}
-        <div className="lg:col-span-8 bg-white rounded-2xl border border-slate-200 p-6 sm:p-8 shadow-xs flex flex-col justify-between min-h-[500px]">
+        <div className={`${isQuestionListOpen ? 'lg:col-span-8' : 'lg:col-span-12'} bg-white rounded-2xl border border-slate-200 p-6 sm:p-8 shadow-xs flex flex-col justify-between min-h-[500px] transition-all duration-200`}>
           <div>
-            {/* Question Meta header */}
-            <div className="flex items-center justify-between pb-4 mb-4 border-b border-slate-100">
+            {/* Top Question Header: Soal | Informasi soal | Daftar soal */}
+            <div className="flex items-center justify-between flex-wrap gap-2 pb-4 mb-4 border-b border-slate-100 relative">
+              {/* Bagian Kiri: Soal */}
               <div className="flex items-center gap-2">
-                <span className="px-3 py-1 bg-indigo-600 text-white rounded-lg font-black text-xs">
-                  SOAL NO. {currentQuestionIndex + 1}
-                </span>
-                <span className="px-2.5 py-0.5 rounded-full text-xs font-bold uppercase bg-slate-100 text-slate-700">
-                  {currentQ?.type.replace(/_/g, ' ')}
-                </span>
-                <span className="text-xs text-slate-500 font-semibold">
-                  (Bobot: {currentQ?.points} Poin)
+                <span className="px-3.5 py-1.5 bg-indigo-600 text-white rounded-xl font-black text-xs sm:text-sm tracking-wide shadow-xs flex items-center gap-1.5">
+                  <FileCheck className="w-4 h-4" />
+                  <span>Soal No. {currentQuestionIndex + 1}</span>
                 </span>
               </div>
 
+              {/* Bagian Tengah: Informasi Soal (Memuat jenis soal & bobot soal) */}
+              <div className="relative">
+                <button
+                  type="button"
+                  onClick={() => setIsQuestionInfoOpen((prev) => !prev)}
+                  className={`px-3 py-1.5 rounded-xl text-xs font-bold flex items-center gap-1.5 transition cursor-pointer border ${
+                    isQuestionInfoOpen
+                      ? 'bg-blue-600 text-white border-blue-600 shadow-xs'
+                      : 'bg-blue-50 hover:bg-blue-100 text-blue-700 border-blue-200'
+                  }`}
+                  title="Klik untuk melihat Jenis dan Bobot Soal"
+                >
+                  <Info className="w-3.5 h-3.5" />
+                  <span>Informasi Soal</span>
+                </button>
+
+                {/* Popover Detail Informasi Soal */}
+                {isQuestionInfoOpen && (
+                  <div className="absolute left-1/2 -translate-x-1/2 top-full mt-2 w-72 bg-white rounded-2xl shadow-xl border border-slate-200 p-4 z-40 animate-in fade-in zoom-in duration-150">
+                    <div className="flex items-center justify-between pb-2 mb-2 border-b border-slate-100">
+                      <div className="flex items-center gap-1.5 text-xs font-extrabold text-slate-800">
+                        <Info className="w-4 h-4 text-blue-600" />
+                        <span>Informasi Soal</span>
+                      </div>
+                      <button
+                        type="button"
+                        onClick={() => setIsQuestionInfoOpen(false)}
+                        className="p-1 text-slate-400 hover:text-slate-600 rounded-lg hover:bg-slate-100 transition cursor-pointer"
+                      >
+                        <X className="w-3.5 h-3.5" />
+                      </button>
+                    </div>
+
+                    <div className="space-y-2 text-xs">
+                      <div className="flex items-center justify-between p-2 rounded-xl bg-slate-50 border border-slate-100">
+                        <span className="text-slate-500 font-medium">Jenis Soal:</span>
+                        <span className="px-2 py-0.5 rounded-md font-bold uppercase text-[11px] bg-indigo-50 text-indigo-700 border border-indigo-200">
+                          {currentQ?.type.replace(/_/g, ' ')}
+                        </span>
+                      </div>
+                      <div className="flex items-center justify-between p-2 rounded-xl bg-slate-50 border border-slate-100">
+                        <span className="text-slate-500 font-medium">Bobot Soal:</span>
+                        <strong className="text-emerald-700 font-black text-sm">{currentQ?.points} Poin</strong>
+                      </div>
+                      <div className="flex items-center justify-between p-2 rounded-xl bg-slate-50 border border-slate-100">
+                        <span className="text-slate-500 font-medium">Status Jawaban:</span>
+                        {userAnswers[currentQ?.id] !== undefined && userAnswers[currentQ?.id] !== '' ? (
+                          <span className="text-emerald-700 font-bold flex items-center gap-1">
+                            <CheckCircle className="w-3.5 h-3.5 text-emerald-600" /> Sudah Terjawab
+                          </span>
+                        ) : (
+                          <span className="text-amber-700 font-bold">Belum Terjawab</span>
+                        )}
+                      </div>
+                    </div>
+                  </div>
+                )}
+              </div>
+
+              {/* Bagian Kanan: Daftar Soal (Gantikan tombol ragu-ragu di posisi ini untuk buka/tutup navigasi) */}
               <button
                 type="button"
-                onClick={() => handleToggleDoubt(currentQ.id)}
-                className={`px-3 py-1 rounded-xl text-xs font-bold flex items-center gap-1.5 transition cursor-pointer ${
-                  isCurrentDoubt
-                    ? 'bg-amber-500 text-white shadow-xs'
-                    : 'bg-slate-100 hover:bg-slate-200 text-slate-600'
+                onClick={() => setIsQuestionListOpen((prev) => !prev)}
+                className={`px-3.5 py-1.5 rounded-xl text-xs font-bold flex items-center gap-1.5 transition cursor-pointer border ${
+                  isQuestionListOpen
+                    ? 'bg-indigo-600 text-white border-indigo-600 shadow-xs'
+                    : 'bg-slate-100 hover:bg-slate-200 text-slate-700 border-slate-200'
                 }`}
+                title="Buka / Tutup Daftar Navigasi Soal"
               >
-                <Flag className="w-3.5 h-3.5" />
-                <span>{isCurrentDoubt ? 'Ragu-ragu (Ditandai)' : 'Tandai Ragu-ragu'}</span>
+                <LayoutGrid className="w-3.5 h-3.5" />
+                <span>Daftar Soal</span>
+                <span className="ml-1 px-1.5 py-0.5 rounded-md text-[10px] font-black bg-slate-200 text-slate-700">
+                  {Object.keys(userAnswers).length}/{totalQ}
+                </span>
               </button>
             </div>
 
@@ -1506,8 +1615,9 @@ export default function SiswaPanel({
             )}
           </div>
 
-          {/* Bottom Navigation Buttons inside Question Box */}
-          <div className="pt-6 mt-6 border-t border-slate-100 flex items-center justify-between">
+          {/* Bottom Navigation Buttons: Sebelumnya | Ragu-Ragu | Selanjutnya */}
+          <div className="pt-6 mt-6 border-t border-slate-100 flex items-center justify-between gap-2">
+            {/* Kiri: Sebelumnya */}
             <button
               type="button"
               disabled={isFirstQuestion}
@@ -1518,13 +1628,39 @@ export default function SiswaPanel({
               <span>Sebelumnya</span>
             </button>
 
-            {!isLastQuestion && (
+            {/* Tengah: Ragu-Ragu */}
+            <button
+              type="button"
+              onClick={() => handleToggleDoubt(currentQ.id)}
+              className={`px-4 py-2.5 rounded-xl text-xs font-bold flex items-center gap-2 transition cursor-pointer border ${
+                isCurrentDoubt
+                  ? 'bg-amber-500 hover:bg-amber-600 text-white border-amber-500 shadow-xs'
+                  : 'bg-amber-50 hover:bg-amber-100 text-amber-800 border-amber-200'
+              }`}
+            >
+              <Flag className="w-4 h-4" />
+              <span>{isCurrentDoubt ? 'Ragu-ragu (Ditandai)' : 'Ragu-Ragu'}</span>
+            </button>
+
+            {/* Kanan: Selanjutnya / Selesai */}
+            {isLastQuestion ? (
+              <button
+                type="button"
+                disabled={!canSubmitNow}
+                onClick={() => setIsSubmitConfirmOpen(true)}
+                className="px-5 py-2.5 bg-emerald-600 hover:bg-emerald-700 disabled:opacity-40 disabled:cursor-not-allowed text-white font-bold rounded-xl text-xs flex items-center gap-1.5 transition cursor-pointer shadow-xs"
+                title={canSubmitNow ? 'Kumpulkan Ujian' : `Tunggu menit ke-${activeExam.minSubmitMinutes}`}
+              >
+                <span>Selesai & Kumpulkan</span>
+                <FileCheck className="w-4 h-4" />
+              </button>
+            ) : (
               <button
                 type="button"
                 onClick={() => setCurrentQuestionIndex((prev) => Math.min(totalQ - 1, prev + 1))}
                 className="px-5 py-2.5 bg-indigo-600 hover:bg-indigo-700 text-white font-bold rounded-xl text-xs flex items-center gap-1.5 transition cursor-pointer shadow-xs"
               >
-                <span>Berikutnya</span>
+                <span>Selanjutnya</span>
                 <ChevronRight className="w-4 h-4" />
               </button>
             )}
@@ -1532,91 +1668,104 @@ export default function SiswaPanel({
         </div>
 
         {/* Right Column: Question Number Grid & Submit Button */}
-        <div className="lg:col-span-4 space-y-4">
-          <div className="bg-white rounded-2xl border border-slate-200 p-5 shadow-xs">
-            <div className="flex items-center justify-between pb-3 mb-3 border-b border-slate-100">
-              <h3 className="font-extrabold text-xs text-slate-800 uppercase tracking-wider">
-                Navigasi Nomor Soal
-              </h3>
-              <span className="text-[11px] font-semibold text-slate-500">
-                {Object.keys(userAnswers).length}/{totalQ} Terisi
-              </span>
-            </div>
-
-            {/* Question Badges Grid */}
-            <div className="grid grid-cols-5 gap-2 max-h-60 overflow-y-auto p-1">
-              {activeExam.questions.map((q, qIndex) => {
-                const isCurrent = qIndex === currentQuestionIndex;
-                const hasAnswer = userAnswers[q.id] !== undefined && userAnswers[q.id] !== '';
-                const isDoubt = doubtQuestions[q.id];
-
-                let bgClass = 'bg-slate-100 text-slate-600 hover:bg-slate-200';
-                if (isDoubt) {
-                  bgClass = 'bg-amber-500 text-white font-black';
-                } else if (hasAnswer) {
-                  bgClass = 'bg-emerald-600 text-white font-bold';
-                }
-
-                return (
+        {isQuestionListOpen && (
+          <div className="lg:col-span-4 space-y-4 animate-in fade-in slide-in-from-right-4 duration-200">
+            <div className="bg-white rounded-2xl border border-slate-200 p-5 shadow-xs">
+              <div className="flex items-center justify-between pb-3 mb-3 border-b border-slate-100">
+                <h3 className="font-extrabold text-xs text-slate-800 uppercase tracking-wider flex items-center gap-1.5">
+                  <LayoutGrid className="w-4 h-4 text-indigo-600" />
+                  <span>Daftar Nomor Soal</span>
+                </h3>
+                <div className="flex items-center gap-2">
+                  <span className="text-[11px] font-semibold text-slate-500">
+                    {Object.keys(userAnswers).length}/{totalQ} Terisi
+                  </span>
                   <button
-                    key={`${q.id}_${qIndex}`}
                     type="button"
-                    onClick={() => setCurrentQuestionIndex(qIndex)}
-                    className={`h-10 rounded-xl text-xs font-bold transition flex items-center justify-center cursor-pointer ${bgClass} ${
-                      isCurrent ? 'ring-3 ring-indigo-500 ring-offset-1' : ''
-                    }`}
+                    onClick={() => setIsQuestionListOpen(false)}
+                    className="p-1 text-slate-400 hover:text-slate-600 rounded-lg hover:bg-slate-100 transition cursor-pointer"
+                    title="Tutup Daftar Soal"
                   >
-                    {qIndex + 1}
+                    <X className="w-4 h-4" />
                   </button>
-                );
-              })}
+                </div>
+              </div>
+
+              {/* Question Badges Grid */}
+              <div className="grid grid-cols-5 gap-2 max-h-60 overflow-y-auto p-1">
+                {activeExam.questions.map((q, qIndex) => {
+                  const isCurrent = qIndex === currentQuestionIndex;
+                  const hasAnswer = userAnswers[q.id] !== undefined && userAnswers[q.id] !== '';
+                  const isDoubt = doubtQuestions[q.id];
+
+                  let bgClass = 'bg-slate-100 text-slate-600 hover:bg-slate-200';
+                  if (isDoubt) {
+                    bgClass = 'bg-amber-500 text-white font-black';
+                  } else if (hasAnswer) {
+                    bgClass = 'bg-emerald-600 text-white font-bold';
+                  }
+
+                  return (
+                    <button
+                      key={`${q.id}_${qIndex}`}
+                      type="button"
+                      onClick={() => setCurrentQuestionIndex(qIndex)}
+                      className={`h-10 rounded-xl text-xs font-bold transition flex items-center justify-center cursor-pointer ${bgClass} ${
+                        isCurrent ? 'ring-3 ring-indigo-500 ring-offset-1' : ''
+                      }`}
+                    >
+                      {qIndex + 1}
+                    </button>
+                  );
+                })}
+              </div>
+
+              {/* Legend */}
+              <div className="pt-4 mt-4 border-t border-slate-100 grid grid-cols-3 gap-2 text-[10px] text-slate-600">
+                <div className="flex items-center gap-1.5">
+                  <span className="w-3 h-3 rounded bg-emerald-600"></span>
+                  <span>Sudah diisi</span>
+                </div>
+                <div className="flex items-center gap-1.5">
+                  <span className="w-3 h-3 rounded bg-amber-500"></span>
+                  <span>Ragu-ragu</span>
+                </div>
+                <div className="flex items-center gap-1.5">
+                  <span className="w-3 h-3 rounded bg-slate-200"></span>
+                  <span>Belum diisi</span>
+                </div>
+              </div>
             </div>
 
-            {/* Legend */}
-            <div className="pt-4 mt-4 border-t border-slate-100 grid grid-cols-3 gap-2 text-[10px] text-slate-600">
-              <div className="flex items-center gap-1.5">
-                <span className="w-3 h-3 rounded bg-emerald-600"></span>
-                <span>Sudah diisi</span>
-              </div>
-              <div className="flex items-center gap-1.5">
-                <span className="w-3 h-3 rounded bg-amber-500"></span>
-                <span>Ragu-ragu</span>
-              </div>
-              <div className="flex items-center gap-1.5">
-                <span className="w-3 h-3 rounded bg-slate-200"></span>
-                <span>Belum diisi</span>
-              </div>
+            {/* Submit Exam Card with Minimum Submit Rule */}
+            <div className="bg-white rounded-2xl border border-slate-200 p-5 shadow-xs text-xs space-y-3">
+              <h4 className="font-bold text-slate-800">Penyelesaian Ujian</h4>
+
+              {canSubmitNow ? (
+                <div className="p-2.5 bg-emerald-50 border border-emerald-200 rounded-xl text-emerald-800 text-[11px]">
+                  Waktu pengerjaan minimal telah tercapai. Anda dapat mengumpulkan lembar jawaban kapan saja.
+                </div>
+              ) : (
+                <div className="p-2.5 bg-amber-50 border border-amber-200 rounded-xl text-amber-800 text-[11px]">
+                  Ujian hanya dapat dikumpulkan setelah menit ke-{activeExam.minSubmitMinutes}.
+                  <br />
+                  Sisa waktu tunggu:{' '}
+                  <strong>{formatTimer(remainingSecondsUntilSubmitAllowed)}</strong>
+                </div>
+              )}
+
+              <button
+                type="button"
+                disabled={!canSubmitNow}
+                onClick={() => setIsSubmitConfirmOpen(true)}
+                className="w-full py-3 px-4 bg-emerald-600 hover:bg-emerald-700 disabled:opacity-40 disabled:cursor-not-allowed text-white rounded-xl font-bold transition flex items-center justify-center gap-2 cursor-pointer shadow-sm"
+              >
+                <FileCheck className="w-4 h-4" />
+                <span>Selesaikan & Kumpulkan</span>
+              </button>
             </div>
           </div>
-
-          {/* Submit Exam Card with Minimum Submit Rule */}
-          <div className="bg-white rounded-2xl border border-slate-200 p-5 shadow-xs text-xs space-y-3">
-            <h4 className="font-bold text-slate-800">Penyelesaian Ujian</h4>
-
-            {canSubmitNow ? (
-              <div className="p-2.5 bg-emerald-50 border border-emerald-200 rounded-xl text-emerald-800 text-[11px]">
-                Waktu pengerjaan minimal telah tercapai. Anda dapat mengumpulkan lembar jawaban kapan saja.
-              </div>
-            ) : (
-              <div className="p-2.5 bg-amber-50 border border-amber-200 rounded-xl text-amber-800 text-[11px]">
-                Ujian hanya dapat dikumpulkan setelah menit ke-{activeExam.minSubmitMinutes}.
-                <br />
-                Sisa waktu tunggu:{' '}
-                <strong>{formatTimer(remainingSecondsUntilSubmitAllowed)}</strong>
-              </div>
-            )}
-
-            <button
-              type="button"
-              disabled={!canSubmitNow}
-              onClick={() => setIsSubmitConfirmOpen(true)}
-              className="w-full py-3 px-4 bg-emerald-600 hover:bg-emerald-700 disabled:opacity-40 disabled:cursor-not-allowed text-white rounded-xl font-bold transition flex items-center justify-center gap-2 cursor-pointer shadow-sm"
-            >
-              <FileCheck className="w-4 h-4" />
-              <span>Selesaikan & Kumpulkan</span>
-            </button>
-          </div>
-        </div>
+        )}
       </div>
 
       {/* MODAL PELANGGARAN KECURANGAN - UJIAN OTOMATIS SELESAI */}
