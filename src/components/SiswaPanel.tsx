@@ -1046,64 +1046,16 @@ export default function SiswaPanel({
                 </span>
               </div>
 
-              {/* Bagian Tengah: Informasi Soal (Memuat jenis soal & bobot soal) */}
-              <div className="relative">
-                <button
-                  type="button"
-                  onClick={() => setIsQuestionInfoOpen((prev) => !prev)}
-                  className={`px-3 py-1.5 rounded-xl text-xs font-bold flex items-center gap-1.5 transition cursor-pointer border ${
-                    isQuestionInfoOpen
-                      ? 'bg-blue-600 text-white border-blue-600 shadow-xs'
-                      : 'bg-blue-50 hover:bg-blue-100 text-blue-700 border-blue-200'
-                  }`}
-                  title="Klik untuk melihat Jenis dan Bobot Soal"
-                >
-                  <Info className="w-3.5 h-3.5" />
-                  <span>Informasi Soal</span>
-                </button>
-
-                {/* Popover Detail Informasi Soal */}
-                {isQuestionInfoOpen && (
-                  <div className="absolute left-1/2 -translate-x-1/2 top-full mt-2 w-72 bg-white rounded-2xl shadow-xl border border-slate-200 p-4 z-40 animate-in fade-in zoom-in duration-150">
-                    <div className="flex items-center justify-between pb-2 mb-2 border-b border-slate-100">
-                      <div className="flex items-center gap-1.5 text-xs font-extrabold text-slate-800">
-                        <Info className="w-4 h-4 text-blue-600" />
-                        <span>Informasi Soal</span>
-                      </div>
-                      <button
-                        type="button"
-                        onClick={() => setIsQuestionInfoOpen(false)}
-                        className="p-1 text-slate-400 hover:text-slate-600 rounded-lg hover:bg-slate-100 transition cursor-pointer"
-                      >
-                        <X className="w-3.5 h-3.5" />
-                      </button>
-                    </div>
-
-                    <div className="space-y-2 text-xs">
-                      <div className="flex items-center justify-between p-2 rounded-xl bg-slate-50 border border-slate-100">
-                        <span className="text-slate-500 font-medium">Jenis Soal:</span>
-                        <span className="px-2 py-0.5 rounded-md font-bold uppercase text-[11px] bg-indigo-50 text-indigo-700 border border-indigo-200">
-                          {currentQ?.type.replace(/_/g, ' ')}
-                        </span>
-                      </div>
-                      <div className="flex items-center justify-between p-2 rounded-xl bg-slate-50 border border-slate-100">
-                        <span className="text-slate-500 font-medium">Bobot Soal:</span>
-                        <strong className="text-emerald-700 font-black text-sm">{currentQ?.points} Poin</strong>
-                      </div>
-                      <div className="flex items-center justify-between p-2 rounded-xl bg-slate-50 border border-slate-100">
-                        <span className="text-slate-500 font-medium">Status Jawaban:</span>
-                        {userAnswers[currentQ?.id] !== undefined && userAnswers[currentQ?.id] !== '' ? (
-                          <span className="text-emerald-700 font-bold flex items-center gap-1">
-                            <CheckCircle className="w-3.5 h-3.5 text-emerald-600" /> Sudah Terjawab
-                          </span>
-                        ) : (
-                          <span className="text-amber-700 font-bold">Belum Terjawab</span>
-                        )}
-                      </div>
-                    </div>
-                  </div>
-                )}
-              </div>
+              {/* Bagian Tengah: Informasi Soal (Membuka jendela pop-up) */}
+              <button
+                type="button"
+                onClick={() => setIsQuestionInfoOpen(true)}
+                className="px-3.5 py-1.5 rounded-xl text-xs font-bold flex items-center gap-1.5 transition cursor-pointer border bg-blue-50 hover:bg-blue-100 text-blue-700 border-blue-200"
+                title="Buka Jendela Informasi Soal"
+              >
+                <Info className="w-3.5 h-3.5" />
+                <span>Informasi Soal</span>
+              </button>
 
               {/* Bagian Kanan: Daftar Soal (Gantikan tombol ragu-ragu di posisi ini untuk buka/tutup navigasi) */}
               <button
@@ -1882,6 +1834,127 @@ export default function SiswaPanel({
                 </div>
               </>
             )}
+          </div>
+        </div>
+      )}
+
+      {/* MODAL POP-UP JENDELA INFORMASI SOAL */}
+      {isQuestionInfoOpen && (
+        <div
+          className="fixed inset-0 z-50 bg-slate-900/60 backdrop-blur-xs flex items-center justify-center p-4 animate-in fade-in duration-150"
+          onClick={() => setIsQuestionInfoOpen(false)}
+        >
+          <div
+            className="bg-white rounded-3xl max-w-md w-full p-6 shadow-2xl border border-slate-200 animate-in zoom-in-95 duration-150 relative"
+            onClick={(e) => e.stopPropagation()}
+          >
+            {/* Header Pop-up */}
+            <div className="flex items-center justify-between pb-3.5 mb-4 border-b border-slate-100">
+              <div className="flex items-center gap-2.5">
+                <div className="w-10 h-10 rounded-2xl bg-blue-50 text-blue-600 flex items-center justify-center shadow-xs">
+                  <Info className="w-5 h-5" />
+                </div>
+                <div>
+                  <h3 className="text-base font-black text-slate-900 leading-tight">
+                    Informasi Soal
+                  </h3>
+                  <p className="text-xs text-slate-500 font-medium">
+                    Soal Nomor {currentQuestionIndex + 1} dari {totalQ} Butir
+                  </p>
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={() => setIsQuestionInfoOpen(false)}
+                className="w-8 h-8 flex items-center justify-center rounded-xl text-slate-400 hover:text-slate-700 hover:bg-slate-100 transition cursor-pointer"
+                title="Tutup Jendela"
+              >
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+
+            {/* Konten Detail Informasi Soal */}
+            <div className="space-y-2.5 text-xs mb-6">
+              {/* Jenis Soal */}
+              <div className="flex items-center justify-between p-3 rounded-2xl bg-slate-50 border border-slate-200/80">
+                <span className="text-slate-600 font-semibold flex items-center gap-1.5">
+                  <BookOpen className="w-4 h-4 text-slate-400" />
+                  Jenis Soal:
+                </span>
+                <span className="px-3 py-1 rounded-xl font-extrabold uppercase text-xs bg-indigo-50 text-indigo-700 border border-indigo-200 tracking-wide">
+                  {currentQ?.type.replace(/_/g, ' ')}
+                </span>
+              </div>
+
+              {/* Bobot Soal */}
+              <div className="flex items-center justify-between p-3 rounded-2xl bg-slate-50 border border-slate-200/80">
+                <span className="text-slate-600 font-semibold flex items-center gap-1.5">
+                  <Award className="w-4 h-4 text-slate-400" />
+                  Bobot Soal:
+                </span>
+                <span className="px-3 py-1 rounded-xl font-black text-xs bg-emerald-50 text-emerald-700 border border-emerald-200 shadow-2xs">
+                  {currentQ?.points} Poin
+                </span>
+              </div>
+
+              {/* Status Pengerjaan Jawaban */}
+              <div className="flex items-center justify-between p-3 rounded-2xl bg-slate-50 border border-slate-200/80">
+                <span className="text-slate-600 font-semibold flex items-center gap-1.5">
+                  <FileCheck className="w-4 h-4 text-slate-400" />
+                  Status Lembar Jawaban:
+                </span>
+                {userAnswers[currentQ?.id] !== undefined && userAnswers[currentQ?.id] !== '' ? (
+                  <span className="px-2.5 py-1 rounded-xl text-xs font-bold bg-emerald-50 text-emerald-700 border border-emerald-200 flex items-center gap-1">
+                    <CheckCircle className="w-3.5 h-3.5 text-emerald-600" /> Sudah Terjawab
+                  </span>
+                ) : (
+                  <span className="px-2.5 py-1 rounded-xl text-xs font-bold bg-slate-100 text-slate-600 border border-slate-200 flex items-center gap-1">
+                    <HelpCircle className="w-3.5 h-3.5 text-slate-400" /> Belum Dijawab
+                  </span>
+                )}
+              </div>
+
+              {/* Status Ragu-Ragu */}
+              <div className="flex items-center justify-between p-3 rounded-2xl bg-slate-50 border border-slate-200/80">
+                <span className="text-slate-600 font-semibold flex items-center gap-1.5">
+                  <Flag className="w-4 h-4 text-slate-400" />
+                  Status Ragu-Ragu:
+                </span>
+                {isCurrentDoubt ? (
+                  <span className="px-2.5 py-1 rounded-xl text-xs font-bold bg-amber-50 text-amber-700 border border-amber-200 flex items-center gap-1">
+                    <Flag className="w-3.5 h-3.5 text-amber-600" /> Ditandai Ragu-ragu
+                  </span>
+                ) : (
+                  <span className="px-2.5 py-1 rounded-xl text-xs font-bold bg-slate-100 text-slate-500 border border-slate-200">
+                    Tidak Ragu-ragu
+                  </span>
+                )}
+              </div>
+
+              {/* Petunjuk Singkat */}
+              <div className="p-3 bg-blue-50/70 rounded-2xl border border-blue-100 text-[11px] text-blue-900 space-y-1">
+                <span className="font-bold block text-blue-950">Petunjuk Singkat:</span>
+                <p className="text-blue-800 leading-relaxed">
+                  {currentQ?.type === 'pilihan_ganda' && 'Pilihlah salah satu opsi jawaban yang paling tepat dari pilihan A sampai E.'}
+                  {currentQ?.type === 'pilihan_ganda_kompleks' && 'Pilihlah satu atau lebih opsi jawaban yang sesuai (dapat memilih lebih dari satu).'}
+                  {currentQ?.type === 'benar_salah' && 'Tentukan pilihan Benar atau Salah pada setiap baris pernyataan yang disajikan.'}
+                  {currentQ?.type === 'menjodohkan' && 'Hubungkan premis di sebelah kiri dengan pasangan yang sesuai di sebelah kanan.'}
+                  {currentQ?.type === 'isian' && 'Ketikkan jawaban singkat dan tepat pada kolom isian teks yang tersedia.'}
+                  {currentQ?.type === 'essay' && 'Tuliskan uraian atau penjelasan lengkap pada area teks esai yang telah disediakan.'}
+                  {currentQ?.type === 'isi_kosong' && 'Isilah kata/istilah yang rumpang pada bagian teks soal.'}
+                  {currentQ?.type === 'susun_kata' && 'Urutkan kepingan kata hingga membentuk kalimat yang runtut dan benar.'}
+                </p>
+              </div>
+            </div>
+
+            {/* Tombol Tutup */}
+            <button
+              type="button"
+              onClick={() => setIsQuestionInfoOpen(false)}
+              className="w-full py-2.5 bg-blue-600 hover:bg-blue-700 text-white rounded-xl font-bold text-xs shadow-sm transition cursor-pointer flex items-center justify-center gap-1.5"
+            >
+              <span>Tutup Informasi Soal</span>
+            </button>
           </div>
         </div>
       )}
