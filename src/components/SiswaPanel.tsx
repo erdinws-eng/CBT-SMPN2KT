@@ -200,11 +200,13 @@ export default function SiswaPanel({
     }
   };
 
-  // Fullscreen helper
+  // Fullscreen helper with aggressive status bar / navigation bar hide
   const requestExamFullScreen = () => {
-    const docEl = document.documentElement;
+    const docEl = document.documentElement as any;
     if (docEl.requestFullscreen) {
-      docEl.requestFullscreen().catch(() => {});
+      docEl.requestFullscreen({ navigationUI: 'hide' }).catch(() => {
+        docEl.requestFullscreen().catch(() => {});
+      });
     }
   };
 
@@ -309,11 +311,22 @@ export default function SiswaPanel({
       e.preventDefault();
     };
 
+    // Cegah gesture tarikan dari tepi paling atas atau paling bawah pada ponsel
+    const handleTouchStart = (e: TouchEvent) => {
+      if (isSubmittingRef.current) return;
+      const touch = e.touches[0];
+      if (!touch) return;
+      if (touch.clientY <= 15 || touch.clientY >= window.innerHeight - 15) {
+        if (e.cancelable) e.preventDefault();
+      }
+    };
+
     document.addEventListener('visibilitychange', handleVisibilityChange);
     window.addEventListener('blur', handleWindowBlur);
     document.addEventListener('fullscreenchange', handleFullscreenChange);
     window.addEventListener('keydown', handleKeyDown);
     window.addEventListener('contextmenu', handleContextMenu);
+    document.addEventListener('touchstart', handleTouchStart, { passive: false });
 
     return () => {
       document.removeEventListener('visibilitychange', handleVisibilityChange);
@@ -321,6 +334,7 @@ export default function SiswaPanel({
       document.removeEventListener('fullscreenchange', handleFullscreenChange);
       window.removeEventListener('keydown', handleKeyDown);
       window.removeEventListener('contextmenu', handleContextMenu);
+      document.removeEventListener('touchstart', handleTouchStart);
     };
   }, [activeExam, currentAttempt]);
 

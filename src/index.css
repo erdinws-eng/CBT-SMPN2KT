@@ -9,6 +9,17 @@
 }
 
 /* Anti-curang styles during CBT session */
+html, body {
+  overscroll-behavior: none !important;
+  overscroll-behavior-y: none !important;
+}
+
+#cbt-exam-room {
+  overscroll-behavior: none !important;
+  overscroll-behavior-y: none !important;
+  -webkit-overflow-scrolling: auto !important;
+}
+
 .cbt-lockdown {
   user-select: none !important;
   -webkit-user-select: none !important;
