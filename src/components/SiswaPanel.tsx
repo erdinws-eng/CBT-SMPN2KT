@@ -39,6 +39,8 @@ import {
   SchoolSettings,
   QuestionType,
 } from '../types';
+import { saveAttempts } from '../lib/storage';
+import { supabaseService } from '../services/supabaseService';
 
 interface SiswaPanelProps {
   currentUser: User;
@@ -71,6 +73,7 @@ export default function SiswaPanel({
   const [isSubmitConfirmOpen, setIsSubmitConfirmOpen] = useState<boolean>(false);
   const [isSubmittingExam, setIsSubmittingExam] = useState<boolean>(false);
   const isSubmittingRef = useRef<boolean>(false);
+  const [isSavingExam, setIsSavingExam] = useState<boolean>(false);
   const [isQuestionInfoOpen, setIsQuestionInfoOpen] = useState<boolean>(false);
   const [isQuestionListOpen, setIsQuestionListOpen] = useState<boolean>(true);
 
@@ -410,12 +413,19 @@ export default function SiswaPanel({
   };
 
   // 5. Submit Exam with Safe 1-2s Delay & Anti-Cheat Protection
-  // Memberi waktu jeda 1 - 2 detik untuk mengirim jawaban sehingga sistem
-  // tidak menganggap keluar mode fullscreen sebagai pelanggaran saat layar HP dimatikan/beralih
   const triggerSubmitExam = async () => {
     if (isSubmittingRef.current) return;
-    isSubmittingRef.current = true;
     setIsSubmittingExam(true);
+    await handleFinishExam(false);
+  };
+
+  // Calculate Score, Save to Supabase & localStorage with 1-2s delay, and Finalize
+  const handleFinishExam = async (isDisqualified = false) => {
+    if (!activeExam || !currentAttempt) return;
+
+    // Pastikan flag submitting aktif agar saat exitFullscreen dipanggil, tidak terpicu event pelanggaran
+    isSubmittingRef.current = true;
+    setIsSavingExam(true);
 
     // Langsung bebaskan wakeLock dan izinkan transisi fullscreen ponsel secara aman
     try {
@@ -428,19 +438,6 @@ export default function SiswaPanel({
     } catch (e) {
       // Abaikan jika tidak didukung browser
     }
-
-    // Jeda aman 1.8 detik (1 - 2 detik) untuk transmisi jawaban ke sistem
-    await new Promise((resolve) => setTimeout(resolve, 1800));
-
-    handleFinishExam(false);
-  };
-
-  // Calculate Score and Submit Exam
-  const handleFinishExam = (isDisqualified = false) => {
-    if (!activeExam || !currentAttempt) return;
-
-    // Pastikan flag submitting aktif agar saat exitFullscreen dipanggil, tidak terpicu event pelanggaran
-    isSubmittingRef.current = true;
 
     let earnedPoints = 0;
     const totalMaxPoints = activeExam.questions.reduce((acc, q) => acc + q.points, 0) || 100;
@@ -531,7 +528,7 @@ export default function SiswaPanel({
       totalEarnedPoints: earnedPoints,
       totalMaxPoints,
       passedKkm: scorePercentage >= activeExam.kkm,
-      violationCount,
+      violationCount: isDisqualified ? Math.max(1, violationCount) : violationCount,
       isGraded: true,
     };
 
@@ -539,16 +536,22 @@ export default function SiswaPanel({
     if (!attempts.find(a => a.id === finalAttempt.id)) {
         updatedAttempts.push(finalAttempt);
     }
-    
-    onUpdateAttempts(updatedAttempts);
 
-    // Release wake lock & fullscreen
-    if (wakeLockRef.current) {
-      wakeLockRef.current.release?.().catch(() => {});
+    // 1. Simpan segera ke localStorage lokal
+    saveAttempts(updatedAttempts);
+
+    // 2. Simpan langsung ke Supabase database jika terkonfigurasi
+    try {
+      await supabaseService.saveExamAttempt(finalAttempt);
+    } catch (err) {
+      console.warn('Gagal menyimpan attempt ke Supabase:', err);
     }
-    if (document.fullscreenElement && document.exitFullscreen) {
-      document.exitFullscreen().catch(() => {});
-    }
+
+    // 3. Jeda 1.6 detik (1-2 detik) agar proses transmisi jawaban selesai dengan aman
+    await new Promise((resolve) => setTimeout(resolve, 1600));
+
+    // 4. Update state React App
+    onUpdateAttempts(updatedAttempts);
 
     // Trigger confetti on good completion
     if (!isDisqualified && scorePercentage >= activeExam.kkm) {
@@ -563,6 +566,7 @@ export default function SiswaPanel({
     setCurrentAttempt(finalAttempt);
     setIsSubmitConfirmOpen(false);
     setIsSubmittingExam(false);
+    setIsSavingExam(false);
 
     // Berikan jeda toleransi 2.5 detik untuk perangkat ponsel agar event blur/fullscreenchange lambat tidak memicu false-violation
     setTimeout(() => {
@@ -587,7 +591,7 @@ export default function SiswaPanel({
   // If student is NOT in exam room: Show Student Dashboard
   if (!activeExam) {
     const riwayatAttempts = attempts.filter(
-      (a) => a.studentId === currentUser.id && a.status === 'submitted'
+      (a) => a.studentId === currentUser.id && a.status !== 'in_progress'
     ).sort((a, b) => new Date(b.startedAt).getTime() - new Date(a.startedAt).getTime());
 
     return (
@@ -891,7 +895,6 @@ export default function SiswaPanel({
                             <th className="py-3 px-4">Waktu Selesai</th>
                             <th className="py-3 px-4 text-center">Nilai</th>
                             <th className="py-3 px-4 text-center">Status</th>
-                            <th className="py-3 px-4 text-center">Aksi</th>
                           </tr>
                         </thead>
                         <tbody className="divide-y divide-slate-100 text-slate-700">
@@ -900,6 +903,7 @@ export default function SiswaPanel({
                             const kkm = exam?.kkm || 75;
                             const isPassed = (attempt.scorePercentage || 0) >= kkm;
                             const isScoreReleased = exam?.releaseScore !== false;
+                            const isDisqualified = attempt.status === 'violation_disqualified';
                             
                             return (
                               <tr key={attempt.id} className="hover:bg-slate-50 transition">
@@ -916,15 +920,21 @@ export default function SiswaPanel({
                                   {isScoreReleased ? attempt.scorePercentage : '-'}
                                 </td>
                                 <td className="py-3 px-4 text-center">
-                                  <span className={`px-2 py-0.5 rounded-full text-[10px] font-bold ${
-                                    isScoreReleased
-                                      ? isPassed
-                                        ? 'bg-emerald-50 text-emerald-700 border border-emerald-200'
-                                        : 'bg-rose-50 text-rose-700 border border-rose-200'
-                                      : 'bg-slate-100 text-slate-600 border border-slate-200'
-                                  }`}>
-                                    {isScoreReleased ? (isPassed ? 'TUNTAS' : 'REMEDIAL') : 'TERSIMPAN'}
-                                  </span>
+                                  {isDisqualified ? (
+                                    <span className="px-2.5 py-1 rounded-full text-[10px] font-extrabold bg-rose-100 text-rose-800 border border-rose-300">
+                                      PELANGGARAN
+                                    </span>
+                                  ) : (
+                                    <span className={`px-2 py-0.5 rounded-full text-[10px] font-bold ${
+                                      isScoreReleased
+                                        ? isPassed
+                                          ? 'bg-emerald-50 text-emerald-700 border border-emerald-200'
+                                          : 'bg-rose-50 text-rose-700 border border-rose-200'
+                                        : 'bg-slate-100 text-slate-600 border border-slate-200'
+                                    }`}>
+                                      {isScoreReleased ? (isPassed ? 'TUNTAS' : 'REMEDIAL') : 'TERSIMPAN'}
+                                    </span>
+                                  )}
                                 </td>
                               </tr>
                             );
@@ -1969,6 +1979,26 @@ export default function SiswaPanel({
             >
               <span>Tutup Informasi Soal</span>
             </button>
+          </div>
+        </div>
+      )}
+
+      {/* MODAL POPUP PENYIMPANAN DATA UJIAN KE DATABASE (JEDA 1-2 DETIK) */}
+      {isSavingExam && (
+        <div className="fixed inset-0 z-[100] bg-slate-900/80 backdrop-blur-md flex items-center justify-center p-4 animate-in fade-in duration-150">
+          <div className="bg-white rounded-3xl max-w-sm w-full p-8 text-center shadow-2xl border border-slate-100 animate-in zoom-in-95 duration-150">
+            <div className="w-16 h-16 rounded-2xl bg-indigo-50 text-indigo-600 flex items-center justify-center mx-auto mb-4 shadow-xs">
+              <Loader2 className="w-8 h-8 animate-spin text-indigo-600" />
+            </div>
+            <h3 className="text-lg font-black text-slate-900 mb-1.5">
+              Menyimpan ke Database...
+            </h3>
+            <p className="text-xs text-slate-500 font-medium leading-relaxed mb-4">
+              Mohon tunggu 1–2 detik, sistem sedang mengamankan lembar jawaban dan skor Anda ke database.
+            </p>
+            <div className="w-full bg-slate-100 rounded-full h-2 overflow-hidden">
+              <div className="bg-indigo-600 h-2 rounded-full animate-pulse w-full" />
+            </div>
           </div>
         </div>
       )}

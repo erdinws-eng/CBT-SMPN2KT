@@ -58,7 +58,25 @@ export default function App() {
       if (sbUsers && sbUsers.length > 0) setUsers(sbUsers);
       if (sbSubjects && sbSubjects.length > 0) setSubjects(sbSubjects);
       if (sbExams) setExams(sanitizeExams(sbExams));
-      if (sbAttempts) setAttempts(sbAttempts);
+      if (sbAttempts) {
+        setAttempts((prevAttempts) => {
+          // Merge sbAttempts with prevAttempts
+          // Jangan pernah menimpa attempt yang sudah berstatus 'submitted' atau 'violation_disqualified' dengan 'in_progress'
+          const merged = [...sbAttempts];
+          prevAttempts.forEach((local) => {
+            const index = merged.findIndex((m) => m.id === local.id);
+            if (index >= 0) {
+              if (local.status !== 'in_progress' && merged[index].status === 'in_progress') {
+                merged[index] = local;
+                supabaseService.saveExamAttempt(local);
+              }
+            } else {
+              merged.push(local);
+            }
+          });
+          return merged;
+        });
+      }
       setIsDataLoaded(true);
       
       // Allow react to apply state before lifting the flag
@@ -135,6 +153,15 @@ export default function App() {
     }
     prevAttemptsRef.current = attempts;
   }, [attempts, isDataLoaded]);
+
+  // Handler update attempts yang langsung menyimpan ke localStorage dan Supabase
+  const handleUpdateAttempts = useCallback((newAttempts: ExamAttempt[]) => {
+    setAttempts(newAttempts);
+    saveAttempts(newAttempts);
+    if (getSupabaseConfig().isConfigured) {
+      newAttempts.forEach((item) => supabaseService.saveExamAttempt(item));
+    }
+  }, []);
 
   useEffect(() => {
     saveSettings(settings);
@@ -246,7 +273,7 @@ export default function App() {
               attempts={attempts}
               settings={settings}
               onUpdateExams={handleUpdateExams}
-              onUpdateAttempts={setAttempts}
+              onUpdateAttempts={handleUpdateAttempts}
               onOpenSupabaseModal={() => setIsSupabaseModalOpen(true)}
               onLogout={handleLogout}
             />
@@ -258,7 +285,7 @@ export default function App() {
               exams={exams}
               attempts={attempts}
               settings={settings}
-              onUpdateAttempts={setAttempts}
+              onUpdateAttempts={handleUpdateAttempts}
             />
           )}
         </main>

@@ -1299,8 +1299,8 @@ export default function GuruPanel({
                 </div>
               </div>
 
-              {/* 2. Key Metrics Grid (4 Stat Cards) */}
-              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 sm:gap-6 items-stretch">
+              {/* 2. Key Metrics Grid (3 Stat Cards) */}
+              <div className="grid grid-cols-1 md:grid-cols-3 gap-4 sm:gap-6 items-stretch">
                 {/* Stat Card 1: Paket Ujian */}
                 <div
                   onClick={() => setActiveTab('jadwal')}
@@ -1341,33 +1341,7 @@ export default function GuruPanel({
                   </div>
                 </div>
 
-                {/* Stat Card 3: Sesi & Peserta Ujian */}
-                <div
-                  onClick={() => setActiveTab('monitoring')}
-                  className="bg-white rounded-2xl p-5 border border-slate-200 shadow-2xs hover:border-blue-400 hover:shadow-md transition cursor-pointer group flex flex-col h-full"
-                >
-                  <div className="flex items-center justify-between mb-3">
-                    <span className="text-xs font-bold text-slate-500 uppercase tracking-wider">Peserta & Sesi</span>
-                    <div className="w-10 h-10 rounded-xl bg-blue-50 text-blue-600 flex items-center justify-center group-hover:scale-110 transition shrink-0">
-                      <Users className="w-5 h-5" />
-                    </div>
-                  </div>
-                  <div className="text-2xl sm:text-3xl font-black text-slate-900 flex items-center gap-2">
-                    <span>{attempts.length}</span>
-                    {attempts.some((a) => a.status === 'in_progress') && (
-                      <span className="flex items-center gap-1 text-xs font-bold text-emerald-600 bg-emerald-50 border border-emerald-200 px-2 py-0.5 rounded-full">
-                        <span className="w-2 h-2 rounded-full bg-emerald-500 animate-ping" />
-                        {attempts.filter((a) => a.status === 'in_progress').length} Aktif
-                      </span>
-                    )}
-                  </div>
-                  <div className="mt-auto pt-3 flex items-center justify-between text-xs text-slate-500">
-                    <span>{attempts.filter((a) => (a.status === 'submitted' || a.status === 'violation_disqualified')).length} Selesai Dikumpulkan</span>
-                    <span className="text-blue-600 font-bold group-hover:translate-x-0.5 transition">Monitor →</span>
-                  </div>
-                </div>
-
-                {/* Stat Card 4: Rata-Rata Nilai & KKM */}
+                {/* Stat Card 3: Rata-Rata Nilai & KKM */}
                 <div
                   onClick={() => setActiveTab('rekap')}
                   className="bg-white rounded-2xl p-5 border border-slate-200 shadow-2xs hover:border-amber-400 hover:shadow-md transition cursor-pointer group flex flex-col h-full"
@@ -1527,8 +1501,8 @@ export default function GuruPanel({
                         Tambahkan stimulus AKM, impor file Excel/Word, atau buat butir soal otomatis dengan <strong>Gemini AI</strong>.
                       </div>
                       <div className="p-3 rounded-xl bg-slate-800/80 border border-slate-700/60">
-                        <span className="font-bold text-white block mb-0.5">3. Live Monitoring</span>
-                        Awasi peserta saat jam ujian berjalan, pantau peringatan kecurangan tab switch, dan lakukan reset kunci bila diperlukan.
+                        <span className="font-bold text-white block mb-0.5">3. Riwayat & Analisis Siswa</span>
+                        Pantau seluruh riwayat pengerjaan, skor nilai AKM, dan catatan integritas siswa pada menu <strong>Riwayat Siswa</strong>.
                       </div>
                       <div className="p-3 rounded-xl bg-slate-800/80 border border-slate-700/60">
                         <span className="font-bold text-white block mb-0.5">4. Rekapitulasi & Cetak</span>
@@ -1538,60 +1512,58 @@ export default function GuruPanel({
                   </div>
                 </div>
 
-                {/* Right Column: Live Monitor Kilat & Hasil Terkini (5 Cols) */}
+                {/* Right Column: Riwayat Ujian Siswa Terkini (5 Cols) */}
                 <div className="lg:col-span-5 space-y-6">
-                  {/* Card 1: Pemantauan Siswa Real-Time */}
+                  {/* Card: Riwayat Ujian Siswa Terkini */}
                   <div className="bg-white rounded-2xl border border-slate-200 p-5 shadow-2xs">
                     <div className="flex items-center justify-between pb-3 border-b border-slate-100">
                       <div className="flex items-center gap-2">
-                        <div className="w-7 h-7 rounded-lg bg-rose-50 text-rose-600 flex items-center justify-center">
-                          <ShieldAlert className="w-4 h-4" />
+                        <div className="w-8 h-8 rounded-xl bg-indigo-50 text-indigo-600 flex items-center justify-center">
+                          <History className="w-4 h-4" />
                         </div>
                         <div>
                           <h3 className="font-extrabold text-sm text-slate-900">
-                            Ruang Ujian Real-Time
+                            Riwayat Ujian Siswa Terkini
                           </h3>
                           <p className="text-[11px] text-slate-500">
-                            Siswa aktif saat ini
+                            Seluruh rekaman hasil & pengumpulan ujian
                           </p>
                         </div>
                       </div>
-                      {attempts.some((a) => a.status === 'in_progress') && (
-                        <span className="flex items-center gap-1.5 px-2.5 py-1 rounded-full text-[10px] font-extrabold bg-emerald-100 text-emerald-800">
-                          <span className="w-2 h-2 rounded-full bg-emerald-500 animate-ping" />
-                          Aktif Berlangsung
-                        </span>
-                      )}
+                      <button
+                        onClick={() => setActiveTab('riwayat_siswa')}
+                        className="text-xs font-bold text-indigo-600 hover:text-indigo-800 transition cursor-pointer"
+                      >
+                        Semua Riwayat →
+                      </button>
                     </div>
 
-                    {/* Content: If there are active students or empty */}
                     {(() => {
-                      const activeOnes = attempts.filter((a) => a.status === 'in_progress');
-                      if (activeOnes.length === 0) {
+                      const allStudentAttempts = [...attempts].reverse();
+                      if (allStudentAttempts.length === 0) {
                         return (
                           <div className="py-8 text-center">
                             <div className="w-12 h-12 rounded-2xl bg-slate-50 text-slate-400 flex items-center justify-center mx-auto mb-3">
                               <History className="w-6 h-6" />
                             </div>
-                            <p className="font-bold text-xs text-slate-800">Belum Ada Sesi Ujian Aktif</p>
+                            <p className="font-bold text-xs text-slate-800">Belum Ada Riwayat Ujian</p>
                             <p className="text-[11px] text-slate-500 mt-0.5 max-w-xs mx-auto">
-                              Siswa yang mengerjakan ujian akan tampil di panel Riwayat Siswa.
+                              Seluruh aktivitas ujian dan pelanggaran siswa akan otomatis tercatat di sini.
                             </p>
-                            <button
-                              onClick={() => setActiveTab('riwayat_siswa')}
-                              className="mt-3 px-3 py-1.5 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-xl text-xs font-bold transition cursor-pointer"
-                            >
-                              Buka Panel Riwayat
-                            </button>
                           </div>
                         );
                       }
 
                       return (
                         <div className="divide-y divide-slate-100 mt-2">
-                          {activeOnes.slice(0, 5).map((att) => {
+                          {allStudentAttempts.slice(0, 8).map((att) => {
                             const stu = students.find((s) => s.id === att.studentId);
                             const ex = exams.find((e) => e.id === att.examId);
+                            const kkm = ex?.kkm || 75;
+                            const scoreVal = att.scorePercentage ?? att.totalScore ?? 0;
+                            const isPass = att.passedKkm ?? (scoreVal >= kkm);
+                            const isDisqualified = att.status === 'violation_disqualified';
+                            const isInProgress = att.status === 'in_progress';
 
                             return (
                               <div key={att.id} className="py-2.5 flex items-center justify-between gap-2">
@@ -1601,106 +1573,46 @@ export default function GuruPanel({
                                       {att.studentName || stu?.name || 'Siswa'}
                                     </span>
                                     <span className="text-[10px] px-1.5 py-0.2 bg-slate-100 text-slate-600 rounded">
-                                      {stu?.classGrade || '8A'}
+                                      {att.studentClass || stu?.classGrade || 'Kelas'}
                                     </span>
                                   </div>
                                   <p className="text-[10px] text-slate-500 truncate mt-0.5">
-                                    {ex?.title || 'Ujian CBT'}
+                                    {ex?.title || att.examTitle}
                                   </p>
                                 </div>
                                 <div className="text-right shrink-0">
-                                  {att.violationCount && att.violationCount > 0 ? (
-                                    <span className="px-2 py-0.5 rounded-full text-[10px] font-extrabold bg-rose-100 text-rose-700">
-                                      {att.violationCount}x Pelanggaran
+                                  {isDisqualified ? (
+                                    <span className="text-[10px] font-extrabold px-2 py-0.5 rounded-full bg-rose-100 text-rose-700 border border-rose-200">
+                                      Pelanggaran
+                                    </span>
+                                  ) : isInProgress ? (
+                                    <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-amber-50 text-amber-700 border border-amber-200">
+                                      Tersimpan
                                     </span>
                                   ) : (
-                                    <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-emerald-50 text-emerald-700">
-                                      Aman
-                                    </span>
+                                    <>
+                                      <span className="text-xs font-black text-slate-900 block">
+                                        {scoreVal.toFixed(1)}
+                                      </span>
+                                      <span className={`text-[9px] font-extrabold px-1.5 py-0.2 rounded ${
+                                        isPass ? 'bg-emerald-100 text-emerald-800' : 'bg-rose-100 text-rose-800'
+                                      }`}>
+                                        {isPass ? 'Lulus KKM' : 'Remedial'}
+                                      </span>
+                                    </>
                                   )}
                                 </div>
                               </div>
                             );
                           })}
-                          <div className="pt-2 text-right">
+                          <div className="pt-3 text-right">
                             <button
                               onClick={() => setActiveTab('riwayat_siswa')}
                               className="text-xs font-bold text-indigo-600 hover:text-indigo-800 transition cursor-pointer"
                             >
-                              Lihat Seluruh {activeOnes.length} Siswa Aktif →
+                              Lihat Lengkap di Menu Riwayat Siswa →
                             </button>
                           </div>
-                        </div>
-                      );
-                    })()}
-                  </div>
-
-                  {/* Card 2: Hasil Nilai Terbaru */}
-                  <div className="bg-white rounded-2xl border border-slate-200 p-5 shadow-2xs">
-                    <div className="flex items-center justify-between pb-3 border-b border-slate-100">
-                      <div className="flex items-center gap-2">
-                        <div className="w-7 h-7 rounded-lg bg-amber-50 text-amber-600 flex items-center justify-center">
-                          <Award className="w-4 h-4" />
-                        </div>
-                        <div>
-                          <h3 className="font-extrabold text-sm text-slate-900">
-                            Hasil Pengerjaan Terkini
-                          </h3>
-                          <p className="text-[11px] text-slate-500">
-                            Ujian yang baru dikumpulkan
-                          </p>
-                        </div>
-                      </div>
-                      <button
-                        onClick={() => setActiveTab('rekap')}
-                        className="text-[11px] font-bold text-amber-600 hover:text-amber-800 transition cursor-pointer"
-                      >
-                        Rekap →
-                      </button>
-                    </div>
-
-                    {(() => {
-                      const submitted = attempts.filter((a) => (a.status === 'submitted' || a.status === 'violation_disqualified'));
-                      if (submitted.length === 0) {
-                        return (
-                          <p className="text-xs text-slate-500 py-6 text-center">
-                            Belum ada siswa yang menyelesaikan dan mengumpulkan ujian.
-                          </p>
-                        );
-                      }
-
-                      return (
-                        <div className="divide-y divide-slate-100 mt-2">
-                          {submitted.slice(-5).reverse().map((att) => {
-                            const stu = students.find((s) => s.id === att.studentId);
-                            const ex = exams.find((e) => e.id === att.examId);
-                            const kkm = ex?.kkm || 75;
-                            const scoreVal = att.scorePercentage ?? att.totalScore ?? 0;
-                            const isPass = att.passedKkm ?? (scoreVal >= kkm);
-
-                            return (
-                              <div key={att.id} className="py-2.5 flex items-center justify-between gap-2">
-                                <div className="min-w-0 flex-1">
-                                  <p className="text-xs font-bold text-slate-900 truncate">
-                                    {att.studentName || stu?.name}
-                                  </p>
-                                  <p className="text-[10px] text-slate-500 truncate">
-                                    {ex?.title} • {stu?.classGrade || '8A'}
-                                  </p>
-                                </div>
-                                <div className="text-right shrink-0">
-                                  <span className="text-xs font-black text-slate-900 block">
-                                    {scoreVal.toFixed(1)}
-                                  </span>
-                                  <span className={`text-[9px] font-extrabold px-1.5 py-0.2 rounded ${
-                                    isPass ? 'bg-emerald-100 text-emerald-800' : 'bg-rose-100 text-rose-800'
-                                  }`}>
-                                    {isPass ? 'Lulus KKM' : 'Belum Lulus'}
-                                  </span>
-                                </div>
-                              </div>
-                            );
-                          })}
                         </div>
                       );
                     })()}
@@ -2651,8 +2563,8 @@ export default function GuruPanel({
         const activeExam = exams.find(e => e.id === activeExamId) || exams[0];
         const activeClass = riwayatSelectedClass || 'Semua Kelas';
 
-        // Find submitted attempts for this exam
-        const examSubmittedAttempts = attempts.filter(a => (a.status === 'submitted' || a.status === 'violation_disqualified') && a.examId === activeExamId);
+        // Seluruh riwayat percobaan ujian untuk paket asesmen ini
+        const examSubmittedAttempts = attempts.filter(a => a.examId === activeExamId);
         const uniqueClasses = Array.from(new Set(examSubmittedAttempts.map(a => a.studentClass).filter(Boolean))).sort();
 
         // If exam and class are selected, filter attempts for these
@@ -2685,13 +2597,13 @@ export default function GuruPanel({
 
         for (const studentId in studentGroups) {
           const group = studentGroups[studentId];
-          const bestScore = Math.max(...group.attempts.map(a => a.totalScore || 0));
+          const bestScore = Math.max(0, ...group.attempts.map(a => a.totalScore ?? a.scorePercentage ?? 0));
           const latestAttempt = group.attempts[group.attempts.length - 1];
           studentRiwayat.push({
             ...group,
             totalAttempts: group.attempts.length,
             bestScore,
-            passedKkm: latestAttempt.passedKkm || bestScore >= (activeExam?.kkm || 75)
+            passedKkm: latestAttempt?.passedKkm || bestScore >= (activeExam?.kkm || 75)
           });
         }
         
@@ -3289,7 +3201,6 @@ export default function GuruPanel({
       {isRiwayatModalOpen && selectedRiwayatStudent && (() => {
         const currentExamId = riwayatSelectedExamId || selectedExamId || exams[0]?.id;
         const studentAttempts = attempts.filter(a => 
-          (a.status === 'submitted' || a.status === 'violation_disqualified') && 
           a.examId === currentExamId &&
           a.studentId === selectedRiwayatStudent.studentId
         ).sort((a,b) => new Date(a.startedAt).getTime() - new Date(b.startedAt).getTime());
