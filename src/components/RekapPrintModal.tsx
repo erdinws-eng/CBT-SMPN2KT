@@ -21,12 +21,39 @@ export default function RekapPrintModal({
   if (!isOpen || !exam) return null;
 
   const kkm = exam.kkm || 75;
-  const passedCount = attempts.filter((a) => a.scorePercentage >= kkm).length;
-  const failedCount = attempts.length - passedCount;
-  const passRate = attempts.length > 0 ? Math.round((passedCount / attempts.length) * 100) : 0;
+
+  // Bagi siswa yang melakukan percobaan lebih dari satu kali, ambil 1 data dengan nilai paling tinggi (best score)
+  const uniqueStudentAttempts = (() => {
+    const studentMap: Record<string, ExamAttempt> = {};
+
+    attempts.forEach((att) => {
+      const key = att.studentId || att.studentNisn || att.studentName;
+      if (!studentMap[key]) {
+        studentMap[key] = att;
+      } else {
+        const currentBest = studentMap[key].scorePercentage ?? studentMap[key].totalScore ?? 0;
+        const candidateScore = att.scorePercentage ?? att.totalScore ?? 0;
+        if (candidateScore > currentBest) {
+          studentMap[key] = att;
+        } else if (candidateScore === currentBest) {
+          const currentTime = new Date(studentMap[key].submittedAt || studentMap[key].startedAt).getTime();
+          const candidateTime = new Date(att.submittedAt || att.startedAt).getTime();
+          if (candidateTime > currentTime) {
+            studentMap[key] = att;
+          }
+        }
+      }
+    });
+
+    return Object.values(studentMap).sort((a, b) => a.studentName.localeCompare(b.studentName));
+  })();
+
+  const passedCount = uniqueStudentAttempts.filter((a) => a.scorePercentage >= kkm).length;
+  const failedCount = uniqueStudentAttempts.length - passedCount;
+  const passRate = uniqueStudentAttempts.length > 0 ? Math.round((passedCount / uniqueStudentAttempts.length) * 100) : 0;
   const averageScore =
-    attempts.length > 0
-      ? Math.round(attempts.reduce((acc, a) => acc + a.scorePercentage, 0) / attempts.length)
+    uniqueStudentAttempts.length > 0
+      ? Math.round(uniqueStudentAttempts.reduce((acc, a) => acc + a.scorePercentage, 0) / uniqueStudentAttempts.length)
       : 0;
 
   return (
@@ -154,14 +181,14 @@ export default function RekapPrintModal({
                 </tr>
               </thead>
               <tbody>
-                {attempts.length === 0 ? (
+                {uniqueStudentAttempts.length === 0 ? (
                   <tr>
                     <td colSpan={7} className="p-6 text-center text-slate-400 border border-slate-400">
                       Belum ada siswa yang menyelesaikan ujian ini.
                     </td>
                   </tr>
                 ) : (
-                  attempts.map((att, idx) => {
+                  uniqueStudentAttempts.map((att, idx) => {
                     const isPassed = att.scorePercentage >= kkm;
                     return (
                       <tr key={att.id} className="border-b border-slate-300">
@@ -195,6 +222,21 @@ export default function RekapPrintModal({
                   })
                 )}
               </tbody>
+              {uniqueStudentAttempts.length > 0 && (
+                <tfoot>
+                  <tr className="bg-slate-100 font-bold border-t-2 border-slate-400 text-slate-900">
+                    <td colSpan={5} className="p-2 border border-slate-400 text-right uppercase text-[11px]">
+                      Rata-Rata Nilai Tertinggi Siswa ({uniqueStudentAttempts.length} Siswa):
+                    </td>
+                    <td className="p-2 border border-slate-400 text-center font-black text-sm">
+                      {averageScore}
+                    </td>
+                    <td className="p-2 border border-slate-400 text-center text-[11px] font-bold">
+                      {passRate}% Tuntas ({passedCount}/{uniqueStudentAttempts.length})
+                    </td>
+                  </tr>
+                </tfoot>
+              )}
             </table>
           </div>
 

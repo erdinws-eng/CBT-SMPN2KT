@@ -2469,7 +2469,7 @@ export default function GuruPanel({
                     selectedExam?.title || 'Ujian',
                     selectedExam?.subjectName || 'Mapel',
                     selectedExam?.kkm || 75,
-                    filteredRekapAttempts
+                    rekapStudentList.map(item => item.attempt)
                   )
                 }
                 className="px-3.5 py-2 bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl text-xs font-bold flex items-center gap-1.5 transition cursor-pointer shadow-xs whitespace-nowrap"

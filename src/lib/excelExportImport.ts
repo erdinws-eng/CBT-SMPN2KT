@@ -187,7 +187,24 @@ export function exportExamResultsToExcel(
   attempts: ExamAttempt[],
   fileName?: string
 ) {
-  const rows = attempts.map((att, idx) => {
+  // Kelompokkan per siswa dan ambil nilai tertinggi (best score)
+  const studentMap: Record<string, ExamAttempt> = {};
+  attempts.forEach((att) => {
+    const key = att.studentId || att.studentNisn || att.studentName;
+    if (!studentMap[key]) {
+      studentMap[key] = att;
+    } else {
+      const currentBest = studentMap[key].scorePercentage ?? studentMap[key].totalScore ?? 0;
+      const candidateScore = att.scorePercentage ?? att.totalScore ?? 0;
+      if (candidateScore > currentBest) {
+        studentMap[key] = att;
+      }
+    }
+  });
+
+  const uniqueAttempts = Object.values(studentMap).sort((a, b) => a.studentName.localeCompare(b.studentName));
+
+  const rows = uniqueAttempts.map((att, idx) => {
     const isPassed = att.scorePercentage >= kkm;
     return {
       'No': idx + 1,
