@@ -48,6 +48,7 @@ interface SiswaPanelProps {
   attempts: ExamAttempt[];
   settings: SchoolSettings;
   onUpdateAttempts: (attempts: ExamAttempt[]) => void;
+  onRefreshData?: () => Promise<void>;
 }
 
 export default function SiswaPanel({
@@ -56,6 +57,7 @@ export default function SiswaPanel({
   attempts,
   settings,
   onUpdateAttempts,
+  onRefreshData,
 }: SiswaPanelProps) {
   // Layout state
   const [activeTab, setActiveTab] = useState<'dashboard' | 'riwayat'>('dashboard');
@@ -76,6 +78,7 @@ export default function SiswaPanel({
   const [isSavingExam, setIsSavingExam] = useState<boolean>(false);
   const [isQuestionInfoOpen, setIsQuestionInfoOpen] = useState<boolean>(false);
   const [isQuestionListOpen, setIsQuestionListOpen] = useState<boolean>(true);
+  const [isCheckingPermission, setIsCheckingPermission] = useState<boolean>(false);
 
   // Anti-cheat state
   const [violationCount, setViolationCount] = useState<number>(0);
@@ -134,8 +137,26 @@ export default function SiswaPanel({
   useEffect(() => {
     if (activeExam) return; // Jangan timpa jika siswa sedang di dalam ruang ujian aktif
 
+    // Cek seluruh ujian yang sudah diserahkan (submitted) agar draf lokal selalu bersih
+    const submittedExamIds = new Set(
+      attempts
+        .filter((a) => a.studentId === currentUser.id && a.status === 'submitted')
+        .map((a) => a.examId)
+    );
+
+    // Bersihkan draf lokal jika ujian sudah diserahkan
+    submittedExamIds.forEach((examId) => {
+      const key = getProgressStorageKey(currentUser.id, examId);
+      try {
+        localStorage.removeItem(key);
+      } catch (e) {}
+    });
+
     attempts.forEach((att) => {
       if (att.studentId === currentUser.id && att.status === 'in_progress') {
+        // Jika ujian sudah pernah diserahkan (submitted), JANGAN PERNAH membuat draf pengerjaan lagi
+        if (submittedExamIds.has(att.examId)) return;
+
         const key = getProgressStorageKey(currentUser.id, att.examId);
         const raw = localStorage.getItem(key);
         let localData: any = {};
@@ -167,36 +188,80 @@ export default function SiswaPanel({
         localStorage.setItem(key, JSON.stringify(updatedLocal));
       }
     });
-  }, [attempts, currentUser.id, activeExam]);
+
+    // Otomatis tutup jendela modal peringatan pelanggaran jika guru sudah mengklik "Lanjutkan"
+    const hasResumedAttempt = attempts.some(
+      (att) => att.studentId === currentUser.id && att.status === 'in_progress' && !submittedExamIds.has(att.examId)
+    );
+    if (hasResumedAttempt && violationWarningModal) {
+      setViolationWarningModal(null);
+    }
+  }, [attempts, currentUser.id, activeExam, violationWarningModal]);
+
+  // Fungsi periksa izin guru secara manual (misal siswa klik tombol Cek Izin)
+  const handleCheckTeacherPermission = async (targetExam?: Exam) => {
+    setIsCheckingPermission(true);
+    try {
+      if (onRefreshData) {
+        await onRefreshData();
+      }
+      await new Promise((resolve) => setTimeout(resolve, 500));
+
+      const isResumed = attempts.some((att) => {
+        if (att.studentId !== currentUser.id || att.status !== 'in_progress') return false;
+        if (targetExam && att.examId !== targetExam.id) return false;
+        return true;
+      });
+
+      if (isResumed) {
+        setViolationWarningModal(null);
+        if (targetExam) {
+          handleStartExam(targetExam);
+        }
+      } else {
+        alert(
+          'Pengawas/Guru belum menekan tombol "Lanjutkan". Silakan lapor ke Pengawas di ruangan ujian agar tombol "Lanjutkan" pada tabel pemantauan diklik.'
+        );
+      }
+    } catch (e) {
+      console.warn('Gagal cek izin:', e);
+    } finally {
+      setIsCheckingPermission(false);
+    }
+  };
 
   // 1. Enter Exam directly without token
   const handleStartExam = (exam: Exam) => {
     // Check existing attempts for this exam
-    const existingAttempts = attempts.filter(
+    const studentExamAttempts = attempts.filter(
       (a) => a.examId === exam.id && a.studentId === currentUser.id
-    ).sort((a, b) => new Date(a.startedAt).getTime() - new Date(b.startedAt).getTime());
-    
-    const latestAttempt = existingAttempts.length > 0 ? existingAttempts[existingAttempts.length - 1] : null;
+    );
 
-    if (latestAttempt && latestAttempt.status === 'submitted') {
+    // Utamakan attempt in_progress (hasil guru klik Lanjutkan)
+    const inProgressAttempt = studentExamAttempts.find((a) => a.status === 'in_progress');
+    const isResumedByTeacher = Boolean(inProgressAttempt);
+
+    const sortedAttempts = [...studentExamAttempts].sort(
+      (a, b) => new Date(a.startedAt).getTime() - new Date(b.startedAt).getTime()
+    );
+    const latestAttempt = sortedAttempts.length > 0 ? sortedAttempts[sortedAttempts.length - 1] : null;
+
+    if (latestAttempt && latestAttempt.status === 'submitted' && !isResumedByTeacher) {
       if (!exam.allowRetake) {
         alert('Anda sudah menyelesaikan ujian ini dan tidak ada kesempatan remedial.');
         return;
       }
-      if (existingAttempts.length >= (exam.maxRetakes || 1) + 1) { // 1 initial + maxRetakes
-        alert(`Anda telah mencapai batas maksimal pengerjaan (Total: ${existingAttempts.length} kali).`);
+      if (sortedAttempts.length >= (exam.maxRetakes || 1) + 1) { // 1 initial + maxRetakes
+        alert(`Anda telah mencapai batas maksimal pengerjaan (Total: ${sortedAttempts.length} kali).`);
         return;
       }
     }
 
     // Cek apakah siswa berstatus terkunci karena pelanggaran (belum diizinkan lanjut oleh guru)
-    const isDisqualified = latestAttempt && latestAttempt.status === 'violation_disqualified';
-    const isResumedByTeacher = latestAttempt && latestAttempt.status === 'in_progress';
+    const isDisqualified = !isResumedByTeacher && studentExamAttempts.some((a) => a.status === 'violation_disqualified');
 
-    if (isDisqualified && !isResumedByTeacher) {
-      alert(
-        'Ujian Anda saat ini terkunci karena terdeteksi pelanggaran. Silakan hubungi Pengawas/Guru di ruangan untuk meminta tombol "Lanjutkan Ujian" agar Anda dapat membuka dan mengerjakan ujian kembali.'
-      );
+    if (isDisqualified) {
+      handleCheckTeacherPermission(exam);
       return;
     }
 
@@ -616,6 +681,14 @@ export default function SiswaPanel({
 
     const finalAttempt: ExamAttempt = {
       ...currentAttempt,
+      id: currentAttempt?.id || 'att_' + Date.now(),
+      examId: activeExam.id,
+      examTitle: activeExam.title,
+      subjectName: activeExam.subjectName,
+      studentId: currentUser.id,
+      studentName: currentUser.name,
+      studentNisn: currentUser.nip_nisn || '',
+      studentClass: studentClass,
       status: isDisqualified ? 'violation_disqualified' : 'submitted',
       answers: userAnswers,
       submittedAt: new Date().toISOString(),
@@ -629,10 +702,16 @@ export default function SiswaPanel({
       isGraded: true,
     };
 
-    const updatedAttempts = attempts.map(a => a.id === finalAttempt.id ? finalAttempt : a);
-    if (!attempts.find(a => a.id === finalAttempt.id)) {
-        updatedAttempts.push(finalAttempt);
-    }
+    // Bersihkan seluruh attempt in_progress untuk siswa dan ujian ini agar status final submitted menang mutlak
+    const filteredAttempts = attempts.filter(
+      (a) =>
+        !(
+          a.examId === activeExam.id &&
+          a.studentId === currentUser.id &&
+          a.status === 'in_progress'
+        ) && a.id !== finalAttempt.id
+    );
+    const updatedAttempts = [...filteredAttempts, finalAttempt];
 
     // 1. Simpan segera ke localStorage riwayat attempts
     saveAttempts(updatedAttempts);
@@ -640,6 +719,17 @@ export default function SiswaPanel({
     // 2. Simpan langsung ke Supabase database jika terkonfigurasi (dikirim saat pelanggaran ATAU saat siswa selesai)
     try {
       await supabaseService.saveExamAttempt(finalAttempt);
+      // Bersihkan attempt in_progress lama dari Supabase jika ada ID berbeda
+      const staleInProgress = attempts.filter(
+        (a) =>
+          a.examId === activeExam.id &&
+          a.studentId === currentUser.id &&
+          a.status === 'in_progress' &&
+          a.id !== finalAttempt.id
+      );
+      for (const stale of staleInProgress) {
+        await supabaseService.deleteExamAttempt(stale.id);
+      }
     } catch (err) {
       console.warn('Gagal menyimpan attempt ke Supabase:', err);
     }
@@ -805,16 +895,41 @@ export default function SiswaPanel({
 
                   <div className="grid grid-cols-1 xl:grid-cols-2 2xl:grid-cols-3 gap-6">
                     {myExams.map((exam) => {
-                      // Cari percobaan terkini dari database
-                      const attempt = [...attempts].filter(
+                      // Cari seluruh percobaan ujian siswa untuk mata pelajaran ini
+                      const studentExamAttempts = attempts.filter(
                         (a) => a.examId === exam.id && a.studentId === currentUser.id
-                      ).sort((a, b) => new Date(b.startedAt).getTime() - new Date(a.startedAt).getTime())[0];
-                      const isFinished = attempt?.status === 'submitted';
-                      const isDisqualified = attempt?.status === 'violation_disqualified';
-                      const isResumedByTeacher = attempt?.status === 'in_progress';
+                      );
+
+                      // Cari attempt yang sudah diserahkan (submitted)
+                      const submittedAttempts = studentExamAttempts.filter((a) => a.status === 'submitted');
+                      const latestSubmitted = [...submittedAttempts].sort(
+                        (a, b) => new Date(b.submittedAt || b.startedAt).getTime() - new Date(a.submittedAt || a.startedAt).getTime()
+                      )[0];
+
+                      // Cari attempt yang terkena pelanggaran
+                      const disqualifiedAttempts = studentExamAttempts.filter((a) => a.status === 'violation_disqualified');
+                      const latestDisqualified = [...disqualifiedAttempts].sort(
+                        (a, b) => new Date(b.startedAt).getTime() - new Date(a.startedAt).getTime()
+                      )[0];
+
+                      // Cari attempt in_progress (hanya jika dimulai SETELAH submit terakhir atau belum pernah submit)
+                      const inProgressAttempt = studentExamAttempts.find((a) => {
+                        if (a.status !== 'in_progress') return false;
+                        if (!latestSubmitted) return true;
+                        // Hanya anggap in_progress valid jika dimulai SETELAH submit terakhir (misal remedial aktif)
+                        return new Date(a.startedAt).getTime() > new Date(latestSubmitted.submittedAt || latestSubmitted.startedAt).getTime();
+                      });
+
                       const hasLocalProgress = Boolean(localStorage.getItem(getProgressStorageKey(currentUser.id, exam.id)));
-                      const canResume = isResumedByTeacher || (hasLocalProgress && !isDisqualified);
-                      const isPassed = (attempt?.scorePercentage || 0) >= exam.kkm;
+
+                      // Jika siswa sudah submit: UJIAN SELESAI!
+                      const isFinished = Boolean(latestSubmitted);
+                      const isDisqualified = !isFinished && Boolean(latestDisqualified);
+                      const isResumedByTeacher = !isFinished && !isDisqualified && Boolean(inProgressAttempt);
+                      const canResume = !isFinished && (isResumedByTeacher || (hasLocalProgress && !isDisqualified));
+
+                      const displayScore = latestSubmitted?.scorePercentage ?? latestSubmitted?.totalScore ?? 0;
+                      const isPassed = displayScore >= exam.kkm;
 
                       const subjectColors = [
                         { card: 'bg-indigo-50 border-indigo-200 hover:border-indigo-300 ring-indigo-100', badge: 'bg-indigo-100 text-indigo-700 border-indigo-200', btnStart: 'bg-indigo-600 hover:bg-indigo-700', btnCont: 'bg-amber-500 hover:bg-amber-600' },
@@ -846,9 +961,15 @@ export default function SiswaPanel({
                                 >
                                   {isPassed ? 'TUNTAS KKM' : 'REMEDIAL'}
                                 </span>
-                              ) : isDisqualified && !isResumedByTeacher ? (
-                                <span className="px-2.5 py-0.5 rounded-full text-[11px] font-bold bg-rose-100 text-rose-800">
-                                  Terkunci (Pelanggaran)
+                              ) : isDisqualified ? (
+                                <span className="px-2.5 py-0.5 rounded-full text-[11px] font-bold bg-rose-100 text-rose-800 border border-rose-300 flex items-center gap-1">
+                                  <ShieldAlert className="w-3.5 h-3.5 text-rose-600 shrink-0" />
+                                  <span>Terkunci (Pelanggaran)</span>
+                                </span>
+                              ) : isResumedByTeacher ? (
+                                <span className="px-2.5 py-0.5 rounded-full text-[11px] font-bold bg-emerald-100 text-emerald-800 border border-emerald-300 flex items-center gap-1 animate-pulse">
+                                  <ShieldCheck className="w-3.5 h-3.5 text-emerald-600 shrink-0" />
+                                  <span>Izin Guru Aktif</span>
                                 </span>
                               ) : canResume ? (
                                 <span className="px-2.5 py-0.5 rounded-full text-[11px] font-bold bg-amber-50 text-amber-800 border border-amber-200">
@@ -904,7 +1025,7 @@ export default function SiswaPanel({
                                 <div className="flex items-center justify-between mb-1">
                                   <span className="text-emerald-800 font-semibold">Hasil Nilai Ujian:</span>
                                   <strong className="text-lg font-black text-emerald-900">
-                                    {exam.releaseScore ? `${attempt?.scorePercentage}` : 'Tersimpan'}
+                                    {exam.releaseScore ? `${displayScore ?? '-'}` : 'Tersimpan'}
                                   </strong>
                                 </div>
                                 {exam.releaseScore ? (
@@ -940,27 +1061,44 @@ export default function SiswaPanel({
                                   </div>
                                 )}
                               </div>
-                            ) : isDisqualified && !isResumedByTeacher ? (
-                              <button
-                                type="button"
-                                onClick={() =>
-                                  alert(
-                                    'Ujian Anda saat ini terkunci karena terdeteksi pelanggaran. Silakan minta Pengawas / Guru di ruangan untuk menekan tombol "Lanjutkan" pada tabel pemantauan agar Anda dapat membuka dan melanjutkan ujian kembali.'
-                                  )
-                                }
-                                className="w-full py-2.5 px-4 bg-rose-100 hover:bg-rose-200 text-rose-800 font-bold text-xs rounded-xl flex items-center justify-center gap-2 border border-rose-300 transition cursor-pointer"
-                              >
-                                <ShieldAlert className="w-4 h-4 text-rose-600 shrink-0" />
-                                <span className="truncate">Terkunci (Minta Izin Guru)</span>
-                              </button>
+                            ) : isDisqualified ? (
+                              <div className="flex flex-col gap-2 w-full">
+                                <button
+                                  type="button"
+                                  onClick={() => handleCheckTeacherPermission(exam)}
+                                  disabled={isCheckingPermission}
+                                  className="w-full py-2.5 px-4 bg-rose-100 hover:bg-rose-200 text-rose-800 font-bold text-xs rounded-xl flex items-center justify-center gap-2 border border-rose-300 transition cursor-pointer"
+                                  title="Klik untuk meminta / mengecek apakah Guru sudah membuka kunci ujian"
+                                >
+                                  {isCheckingPermission ? (
+                                    <Loader2 className="w-4 h-4 animate-spin text-rose-700 shrink-0" />
+                                  ) : (
+                                    <ShieldAlert className="w-4 h-4 text-rose-600 shrink-0" />
+                                  )}
+                                  <span className="truncate">Terkunci (Minta Izin Guru)</span>
+                                </button>
+                                <button
+                                  type="button"
+                                  onClick={() => handleCheckTeacherPermission(exam)}
+                                  disabled={isCheckingPermission}
+                                  className="w-full py-2 px-3 bg-white hover:bg-slate-100 text-slate-800 font-extrabold text-[11px] rounded-xl flex items-center justify-center gap-1.5 border border-slate-300 transition cursor-pointer shadow-xs"
+                                >
+                                  <RotateCcw className={`w-3.5 h-3.5 text-blue-600 ${isCheckingPermission ? 'animate-spin' : ''}`} />
+                                  <span>{isCheckingPermission ? 'Sedang Memeriksa Izin...' : 'Cek Status Izin Sekarang'}</span>
+                                </button>
+                              </div>
                             ) : canResume ? (
                               <button
                                 id={`btn-start-exam-${exam.id}`}
                                 onClick={() => handleStartExam(exam)}
-                                className={`w-full py-2.5 px-4 text-white font-bold text-xs rounded-xl flex items-center justify-center gap-2 shadow-xs transition cursor-pointer ${theme.btnCont}`}
+                                className={`w-full py-2.5 px-4 text-white font-bold text-xs rounded-xl flex items-center justify-center gap-2 shadow-xs transition cursor-pointer ${
+                                  isResumedByTeacher ? 'bg-emerald-600 hover:bg-emerald-700 ring-2 ring-emerald-300 animate-pulse' : theme.btnCont
+                                }`}
                               >
                                 <Play className="w-4 h-4 shrink-0" />
-                                <span className="truncate">Lanjutkan Pengerjaan</span>
+                                <span className="truncate">
+                                  {isResumedByTeacher ? 'Lanjutkan Ujian (Izin Guru Aktif)' : 'Lanjutkan Pengerjaan'}
+                                </span>
                                 <ArrowRight className="w-3.5 h-3.5 shrink-0" />
                               </button>
                             ) : (
@@ -1064,40 +1202,90 @@ export default function SiswaPanel({
         </div>
 
         {/* MODAL PELANGGARAN KECURANGAN PADA BERANDA PANEL SISWA */}
-        {violationWarningModal && (
-          <div className="fixed inset-0 z-50 bg-slate-900/85 backdrop-blur-md flex items-center justify-center p-4">
-            <div className="bg-white rounded-3xl max-w-md w-full p-6 text-center shadow-2xl border-4 border-rose-500 animate-in fade-in zoom-in duration-200">
-              <div className="w-16 h-16 rounded-full bg-rose-100 text-rose-600 flex items-center justify-center mx-auto mb-4 animate-bounce">
-                <ShieldAlert className="w-9 h-9" />
-              </div>
+        {violationWarningModal && (() => {
+          const hasResumedExam = myExams.find((ex) =>
+            attempts.some(
+              (a) => a.examId === ex.id && a.studentId === currentUser.id && a.status === 'in_progress'
+            )
+          );
 
-              <h3 className="text-xl font-black text-slate-900 mb-2">
-                UJIAN DIHENTIKAN OTOMATIS!
-              </h3>
-
-              <p className="text-xs text-rose-700 font-bold whitespace-pre-line leading-relaxed mb-4 bg-rose-50 p-3.5 rounded-xl border border-rose-200 text-left">
-                {violationWarningModal}
-              </p>
-
-              <div className="p-3 bg-amber-50 rounded-xl border border-amber-200 text-[11px] text-amber-900 text-left mb-6 space-y-1">
-                <strong className="block font-bold text-amber-950">
-                  Pemberitahuan untuk Siswa:
-                </strong>
-                <span>
-                  Apabila pelanggaran ini terjadi tanpa sengaja (misalnya popup sistem operasi atau kendala perangkat), silakan segera lapor ke Pengawas/Guru di ruangan ujian. Pengawas dapat melakukan <strong>Buka Kunci (Lanjut)</strong> atau <strong>Reset Ujian Siswa</strong> agar Anda bisa membuka dan mengerjakan kembali.
-                </span>
-              </div>
-
-              <button
-                type="button"
-                onClick={() => setViolationWarningModal(null)}
-                className="w-full py-3 bg-slate-800 hover:bg-slate-900 text-white rounded-xl font-extrabold text-xs shadow-md transition cursor-pointer"
+          return (
+            <div className="fixed inset-0 z-50 bg-slate-900/85 backdrop-blur-md flex items-center justify-center p-4">
+              <div
+                className={`bg-white rounded-3xl max-w-md w-full p-6 text-center shadow-2xl border-4 transition-all duration-300 ${
+                  hasResumedExam ? 'border-emerald-500 animate-in fade-in zoom-in' : 'border-rose-500 animate-in fade-in zoom-in'
+                }`}
               >
-                Tutup & Kembali ke Beranda Siswa
-              </button>
+                {hasResumedExam ? (
+                  <>
+                    <div className="w-16 h-16 rounded-full bg-emerald-100 text-emerald-600 flex items-center justify-center mx-auto mb-4 animate-bounce">
+                      <ShieldCheck className="w-9 h-9" />
+                    </div>
+                    <h3 className="text-xl font-black text-slate-900 mb-2">
+                      IZIN TELAH DIBERIKAN!
+                    </h3>
+                    <p className="text-xs text-emerald-800 font-bold whitespace-pre-line leading-relaxed mb-4 bg-emerald-50 p-3.5 rounded-xl border border-emerald-200 text-left">
+                      Pengawas telah mengizinkan Anda untuk melanjutkan ujian "{hasResumedExam.title}". Seluruh lembar jawaban Anda sebelumnya tersimpan aman di database.
+                    </p>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setViolationWarningModal(null);
+                        handleStartExam(hasResumedExam);
+                      }}
+                      className="w-full py-3 bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl font-extrabold text-xs shadow-md transition cursor-pointer flex items-center justify-center gap-2"
+                    >
+                      <Play className="w-4 h-4" />
+                      <span>Masuk & Lanjutkan Ujian Sekarang</span>
+                    </button>
+                  </>
+                ) : (
+                  <>
+                    <div className="w-16 h-16 rounded-full bg-rose-100 text-rose-600 flex items-center justify-center mx-auto mb-4 animate-bounce">
+                      <ShieldAlert className="w-9 h-9" />
+                    </div>
+
+                    <h3 className="text-xl font-black text-slate-900 mb-2">
+                      UJIAN DIHENTIKAN OTOMATIS!
+                    </h3>
+
+                    <p className="text-xs text-rose-700 font-bold whitespace-pre-line leading-relaxed mb-4 bg-rose-50 p-3.5 rounded-xl border border-rose-200 text-left">
+                      {violationWarningModal}
+                    </p>
+
+                    <div className="p-3 bg-amber-50 rounded-xl border border-amber-200 text-[11px] text-amber-900 text-left mb-6 space-y-1">
+                      <strong className="block font-bold text-amber-950">
+                        Pemberitahuan untuk Siswa:
+                      </strong>
+                      <span>
+                        Apabila pelanggaran ini terjadi tanpa sengaja (misalnya popup atau kendala browser HP), segera lapor ke Pengawas/Guru di ruangan ujian agar tombol <strong>"Lanjutkan"</strong> diklik.
+                      </span>
+                    </div>
+
+                    <div className="flex flex-col gap-2">
+                      <button
+                        type="button"
+                        onClick={() => handleCheckTeacherPermission()}
+                        disabled={isCheckingPermission}
+                        className="w-full py-2.5 bg-blue-600 hover:bg-blue-700 text-white rounded-xl font-extrabold text-xs shadow-md transition cursor-pointer flex items-center justify-center gap-2"
+                      >
+                        <RotateCcw className={`w-4 h-4 ${isCheckingPermission ? 'animate-spin' : ''}`} />
+                        <span>{isCheckingPermission ? 'Sedang Memeriksa Izin...' : 'Cek Status Izin Sekarang'}</span>
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => setViolationWarningModal(null)}
+                        className="w-full py-2 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-xl font-bold text-xs transition cursor-pointer"
+                      >
+                        Tutup & Kembali ke Beranda Siswa
+                      </button>
+                    </div>
+                  </>
+                )}
+              </div>
             </div>
-          </div>
-        )}
+          );
+        })()}
       </div>
     );
   }

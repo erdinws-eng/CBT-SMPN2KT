@@ -599,6 +599,7 @@ export default function GuruPanel({
     } else if (deleteConfirm.type === 'resume_attempt') {
       const attemptId = deleteConfirm.id;
       const studentName = deleteConfirm.title;
+      const targetAtt = allAttempts.find((a) => a.id === attemptId);
       const updated = allAttempts.map((att) => {
         if (att.id === attemptId) {
           return {
@@ -606,6 +607,7 @@ export default function GuruPanel({
             status: 'in_progress' as const,
             violationCount: 0,
             submittedAt: undefined,
+            isGraded: false,
           };
         }
         return att;
@@ -613,6 +615,18 @@ export default function GuruPanel({
       const updatedAtt = updated.find((a) => a.id === attemptId);
       if (updatedAtt && getSupabaseConfig().isConfigured) {
         supabaseService.saveExamAttempt(updatedAtt);
+      }
+      if (targetAtt) {
+        try {
+          const draftKey = `cbt_exam_progress_${targetAtt.studentId}_${targetAtt.examId}`;
+          const existingDraftRaw = localStorage.getItem(draftKey);
+          if (existingDraftRaw) {
+            const draftObj = JSON.parse(existingDraftRaw);
+            draftObj.violationCount = 0;
+            draftObj.status = 'in_progress';
+            localStorage.setItem(draftKey, JSON.stringify(draftObj));
+          }
+        } catch (e) {}
       }
       onUpdateAttempts(updated);
       setIsRiwayatModalOpen(false);
@@ -1584,9 +1598,26 @@ export default function GuruPanel({
                                 </div>
                                 <div className="text-right shrink-0">
                                   {isDisqualified ? (
-                                    <span className="text-[10px] font-extrabold px-2 py-0.5 rounded-full bg-rose-100 text-rose-700 border border-rose-200">
-                                      Pelanggaran
-                                    </span>
+                                    <div className="flex items-center gap-1.5 justify-end">
+                                      <span className="text-[10px] font-extrabold px-2 py-0.5 rounded-full bg-rose-100 text-rose-700 border border-rose-200">
+                                        Pelanggaran
+                                      </span>
+                                      <button
+                                        onClick={() =>
+                                          setDeleteConfirm({
+                                            isOpen: true,
+                                            type: 'resume_attempt',
+                                            id: att.id,
+                                            title: att.studentName || stu?.name || 'Siswa',
+                                          })
+                                        }
+                                        className="px-2 py-0.5 bg-blue-600 hover:bg-blue-700 text-white rounded-md text-[10px] font-bold transition cursor-pointer shadow-xs flex items-center gap-1"
+                                        title="Izinkan Siswa Lanjutkan Ujian"
+                                      >
+                                        <CheckCircle className="w-3 h-3" />
+                                        <span>Lanjutkan</span>
+                                      </button>
+                                    </div>
                                   ) : isInProgress ? (
                                     <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-amber-50 text-amber-700 border border-amber-200">
                                       Tersimpan
@@ -2722,12 +2753,39 @@ export default function GuruPanel({
                           {student.bestScore}
                         </td>
                         <td className="py-3 px-5 text-center">
-                          <span className={`inline-flex px-2 py-0.5 rounded-full text-[10px] font-bold ${student.passedKkm ? 'bg-emerald-50 text-emerald-700 border border-emerald-200' : 'bg-rose-50 text-rose-700 border border-rose-200'}`}>
-                            {student.passedKkm ? 'Tuntas' : 'Tidak Tuntas'}
-                          </span>
+                          {student.attempts.some((a) => a.status === 'violation_disqualified') ? (
+                            <span className="inline-flex px-2 py-0.5 rounded-full text-[10px] font-extrabold bg-rose-100 text-rose-700 border border-rose-300">
+                              Melanggar
+                            </span>
+                          ) : (
+                            <span className={`inline-flex px-2 py-0.5 rounded-full text-[10px] font-bold ${student.passedKkm ? 'bg-emerald-50 text-emerald-700 border border-emerald-200' : 'bg-rose-50 text-rose-700 border border-rose-200'}`}>
+                              {student.passedKkm ? 'Tuntas' : 'Tidak Tuntas'}
+                            </span>
+                          )}
                         </td>
                         <td className="py-3 px-5 text-center">
                           <div className="flex items-center justify-center gap-1.5">
+                            {(() => {
+                              const violationAtt = student.attempts.find((a) => a.status === 'violation_disqualified');
+                              if (!violationAtt) return null;
+                              return (
+                                <button
+                                  onClick={() =>
+                                    setDeleteConfirm({
+                                      isOpen: true,
+                                      type: 'resume_attempt',
+                                      id: violationAtt.id,
+                                      title: student.studentName,
+                                    })
+                                  }
+                                  className="px-2.5 py-1.5 bg-blue-600 hover:bg-blue-700 text-white rounded-lg text-xs font-bold transition cursor-pointer flex items-center gap-1 shadow-xs"
+                                  title={`Izinkan ${student.studentName} Melanjutkan Ujian`}
+                                >
+                                  <CheckCircle className="w-3.5 h-3.5" />
+                                  <span>Lanjutkan</span>
+                                </button>
+                              );
+                            })()}
                             <button
                               id={`btn-detail-riwayat-${student.studentId}`}
                               onClick={() => {

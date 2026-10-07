@@ -80,12 +80,35 @@ export default function App() {
             if (!server) {
               merged.push(local);
             } else {
-              // Jika lokal berstatus 'in_progress' (misal baru di-Lanjutkan oleh guru)
-              // pertahankan status in_progress lokal agar tidak ditimpa kembali
-              if (local.status === 'in_progress' && server.status === 'violation_disqualified') {
-                merged.push(local);
-                supabaseService.saveExamAttempt(local);
-              } else {
+              // 1. Siswa telah selesai mengerjakan ujian (status: 'submitted'):
+              // JANGAN PERNAH menimpa attempt yang sudah submitted dengan status in_progress!
+              if (local.status === 'submitted') {
+                if (server.status === 'submitted') {
+                  // Keduanya submitted, pertahankan yang datanya paling lengkap / skor lebih tinggi
+                  const localScore = local.totalScore ?? local.scorePercentage ?? 0;
+                  const serverScore = server.totalScore ?? server.scorePercentage ?? 0;
+                  if (localScore >= serverScore) {
+                    merged.push(local);
+                  } else {
+                    merged.push(server);
+                  }
+                } else {
+                  // Lokal sudah selesai diserahkan, sedangkan server masih 'in_progress' atau lama.
+                  // LOKAL HARUS MENANG! Sekaligus simpan ke Supabase agar status server segera diperbarui.
+                  merged.push(local);
+                  supabaseService.saveExamAttempt(local);
+                }
+              }
+              // 2. Siswa terkena pelanggaran dan Guru baru saja klik "Lanjutkan" di panel pengawas:
+              else if (local.status === 'violation_disqualified' && server.status === 'in_progress') {
+                merged.push(server);
+              }
+              // 3. Guru mengumpulkan paksa ujian siswa dari panel live monitoring:
+              else if (local.status === 'in_progress' && server.status === 'submitted') {
+                merged.push(server);
+              }
+              // 4. Standar: gunakan data server terbaru
+              else {
                 merged.push(server);
               }
               serverMap.delete(local.id);
@@ -98,7 +121,25 @@ export default function App() {
             }
           });
 
-          return merged;
+          // PEMBERSIHAN DUPLIKAT & STALE IN_PROGRESS PER (studentId, examId):
+          // Jika untuk seorang siswa pada ujian tertentu sudah ada attempt 'submitted',
+          // maka attempt 'in_progress' basi untuk ujian tersebut HARUS DIBUANG agar ujian tidak tampak belum selesai.
+          const submittedKeys = new Set(
+            merged
+              .filter((a) => a.status === 'submitted')
+              .map((a) => `${a.studentId}_${a.examId}`)
+          );
+
+          const finalMerged = merged.filter((a) => {
+            if (a.status === 'in_progress' && submittedKeys.has(`${a.studentId}_${a.examId}`)) {
+              // Hapus juga attempt in_progress basi ini dari Supabase agar bersih permanen
+              supabaseService.deleteExamAttempt(a.id);
+              return false;
+            }
+            return true;
+          });
+
+          return finalMerged;
         });
       }
       setIsDataLoaded(true);
@@ -120,13 +161,52 @@ export default function App() {
     }
   }, [loadDataFromSupabase]);
 
-  // Polling data berkala (Live Monitor) untuk menarik progress siswa yang sedang ujian di perangkat lain
+  // Polling data berkala (Live Monitor) + Realtime WebSocket untuk menarik progress siswa seketika
   useEffect(() => {
     if (!getSupabaseConfig().isConfigured) return;
+
+    // Polling setiap 3 detik untuk sinkronisasi cepat antara Guru dan HP Siswa
     const interval = setInterval(() => {
       loadDataFromSupabase();
-    }, 10000); // 10 detik
-    return () => clearInterval(interval);
+    }, 3000);
+
+    // Ambil data seketika saat aplikasi atau tab dibuka / difokuskan kembali di browser HP siswa
+    const handleFocusOrVisible = () => {
+      if (!document.hidden) {
+        loadDataFromSupabase();
+      }
+    };
+    window.addEventListener('focus', handleFocusOrVisible);
+    document.addEventListener('visibilitychange', handleFocusOrVisible);
+
+    // Supabase Realtime WebSocket subscription untuk update instan (< 0.5 detik) saat guru klik Lanjutkan
+    const supabase = getSupabase();
+    let channel: any = null;
+    if (supabase) {
+      try {
+        channel = supabase
+          .channel('realtime_exam_attempts_sync')
+          .on(
+            'postgres_changes',
+            { event: '*', schema: 'public', table: 'exam_attempts' },
+            () => {
+              loadDataFromSupabase();
+            }
+          )
+          .subscribe();
+      } catch (err) {
+        console.warn('Gagal mengaktifkan realtime Supabase:', err);
+      }
+    }
+
+    return () => {
+      clearInterval(interval);
+      window.removeEventListener('focus', handleFocusOrVisible);
+      document.removeEventListener('visibilitychange', handleFocusOrVisible);
+      if (supabase && channel) {
+        supabase.removeChannel(channel);
+      }
+    };
   }, [loadDataFromSupabase]);
 
   // Sync state changes with localStorage & Supabase (including Deletions)
@@ -168,38 +248,27 @@ export default function App() {
 
   useEffect(() => {
     saveAttempts(attempts);
-    if (getSupabaseConfig().isConfigured && isDataLoaded && !isFetchingRef.current) {
-      attempts.forEach((item) => supabaseService.saveExamAttempt(item));
-      const currentIds = new Set(attempts.map(item => item.id));
-      prevAttemptsRef.current.forEach(old => {
-        if (!currentIds.has(old.id)) {
-          deletedAttemptIdsRef.current.add(old.id);
-          supabaseService.deleteExamAttempt(old.id);
-        }
-      });
-    }
     prevAttemptsRef.current = attempts;
-  }, [attempts, isDataLoaded]);
+  }, [attempts]);
 
   // Handler update attempts yang langsung menyimpan ke localStorage dan Supabase
   const handleUpdateAttempts = useCallback((newAttempts: ExamAttempt[]) => {
-    // Cari dan catat attempt yang dihapus agar langsung dibersihkan dari Supabase
-    setAttempts((prev) => {
-      const newIds = new Set(newAttempts.map((item) => item.id));
-      prev.forEach((old) => {
-        if (!newIds.has(old.id)) {
-          deletedAttemptIdsRef.current.add(old.id);
-          if (getSupabaseConfig().isConfigured) {
-            supabaseService.deleteExamAttempt(old.id);
-          }
+    setAttempts(newAttempts);
+    saveAttempts(newAttempts);
+
+    if (getSupabaseConfig().isConfigured) {
+      newAttempts.forEach((item) => {
+        const prev = prevAttemptsRef.current.find((p) => p.id === item.id);
+        if (
+          !prev ||
+          prev.status !== item.status ||
+          prev.totalScore !== item.totalScore ||
+          prev.scorePercentage !== item.scorePercentage ||
+          prev.submittedAt !== item.submittedAt
+        ) {
+          supabaseService.saveExamAttempt(item);
         }
       });
-      return newAttempts;
-    });
-
-    saveAttempts(newAttempts);
-    if (getSupabaseConfig().isConfigured) {
-      newAttempts.forEach((item) => supabaseService.saveExamAttempt(item));
     }
   }, []);
 
@@ -326,6 +395,7 @@ export default function App() {
               attempts={attempts}
               settings={settings}
               onUpdateAttempts={handleUpdateAttempts}
+              onRefreshData={loadDataFromSupabase}
             />
           )}
         </main>
