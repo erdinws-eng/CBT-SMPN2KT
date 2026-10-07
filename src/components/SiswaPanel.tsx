@@ -95,6 +95,41 @@ export default function SiswaPanel({
   // Calculate elapsed exam time for minimum submit check
   const [elapsedMinutes, setElapsedMinutes] = useState<number>(0);
 
+  // Kunci storage untuk progres pengerjaan ujian aktif siswa di perangkat ini
+  const getProgressStorageKey = (studentId: string, examId: string) =>
+    `cbt_exam_progress_${studentId}_${examId}`;
+
+  // Helper menyimpan progres ujian aktif ke localStorage secara realtime
+  const saveActiveProgressToLocal = (partial: {
+    answers?: Record<string, any>;
+    doubtQuestions?: Record<string, boolean>;
+    currentQuestionIndex?: number;
+    remainingSeconds?: number;
+    violationCount?: number;
+  }) => {
+    if (!activeExam) return;
+    try {
+      const key = getProgressStorageKey(currentUser.id, activeExam.id);
+      const raw = localStorage.getItem(key);
+      const data = raw ? JSON.parse(raw) : {};
+      if (partial.answers !== undefined) data.answers = partial.answers;
+      if (partial.doubtQuestions !== undefined) data.doubtQuestions = partial.doubtQuestions;
+      if (partial.currentQuestionIndex !== undefined) data.currentQuestionIndex = partial.currentQuestionIndex;
+      if (partial.remainingSeconds !== undefined) data.remainingSeconds = partial.remainingSeconds;
+      if (partial.violationCount !== undefined) data.violationCount = partial.violationCount;
+      data.lastSavedAt = new Date().toISOString();
+      localStorage.setItem(key, JSON.stringify(data));
+    } catch (e) {
+      console.warn('Gagal menyimpan progres lokal:', e);
+    }
+  };
+
+  // Navigasi nomor soal sekaligus memperbarui posisi index di localStorage
+  const handleNavigateQuestion = (newIndex: number) => {
+    setCurrentQuestionIndex(newIndex);
+    saveActiveProgressToLocal({ currentQuestionIndex: newIndex });
+  };
+
   // 1. Enter Exam directly without token
   const handleStartExam = (exam: Exam) => {
     // Check existing attempts for this exam
@@ -122,6 +157,18 @@ export default function SiswaPanel({
       return;
     }
 
+    // Periksa apakah ada draf pengerjaan yang tersimpan di localStorage
+    const localKey = getProgressStorageKey(currentUser.id, exam.id);
+    const localRaw = localStorage.getItem(localKey);
+    let localProgress: any = null;
+    if (localRaw) {
+      try {
+        localProgress = JSON.parse(localRaw);
+      } catch (e) {
+        localProgress = null;
+      }
+    }
+
     // Clone questions to safely mutate options
     let questionsOrder = exam.questions.map((q) => {
       const clonedQ = { ...q };
@@ -135,17 +182,27 @@ export default function SiswaPanel({
       return clonedQ;
     });
 
-    // Shuffle questions if randomized
-    if (exam.randomizeQuestions) {
+    // Jika sedang melanjutkan draf lokal, pertahankan urutan butir soal sebelumnya
+    if (localProgress?.questionsOrderIds && Array.isArray(localProgress.questionsOrderIds)) {
+      const qMap = new Map(questionsOrder.map(q => [q.id, q]));
+      const ordered = localProgress.questionsOrderIds.map((id: string) => qMap.get(id)).filter(Boolean) as Question[];
+      if (ordered.length === questionsOrder.length) {
+        questionsOrder = ordered;
+      }
+    } else if (exam.randomizeQuestions) {
       questionsOrder.sort(() => Math.random() - 0.5);
     }
 
-    const isRetake = latestAttempt?.status === 'submitted';
-    const isResuming = latestAttempt?.status === 'in_progress';
+    const resumedAnswers = localProgress?.answers || {};
+    const resumedDoubts = localProgress?.doubtQuestions || {};
+    const resumedIndex = localProgress?.currentQuestionIndex || 0;
+    const resumedSeconds = localProgress?.remainingSeconds !== undefined ? localProgress.remainingSeconds : (exam.durationMinutes * 60);
+    const resumedViolations = localProgress?.violationCount || 0;
+    const attemptId = localProgress?.attemptId || 'att_' + Date.now();
+    const startedAt = localProgress?.startedAt || new Date().toISOString();
 
-    const newAttempt: ExamAttempt = {
-      // If it's a retake, we create a brand NEW attempt ID so we don't overwrite history
-      id: (isResuming && latestAttempt) ? latestAttempt.id : 'att_' + Date.now(),
+    const inMemoryAttempt: ExamAttempt = {
+      id: attemptId,
       examId: exam.id,
       examTitle: exam.title,
       subjectName: exam.subjectName,
@@ -153,8 +210,8 @@ export default function SiswaPanel({
       studentName: currentUser.name,
       studentNisn: currentUser.nip_nisn,
       studentClass: studentClass,
-      answers: isResuming ? (latestAttempt?.answers || {}) : {},
-      scores: isResuming ? (latestAttempt?.scores || {}) : {},
+      answers: resumedAnswers,
+      scores: {},
       totalScore: 0,
       maxPossibleScore: exam.questions.reduce((acc, q) => acc + q.points, 0) || 100,
       scorePercentage: 0,
@@ -162,26 +219,38 @@ export default function SiswaPanel({
       totalEarnedPoints: 0,
       totalMaxPoints: exam.questions.reduce((acc, q) => acc + q.points, 0) || 100,
       status: 'in_progress',
-      violationCount: isResuming ? (latestAttempt?.violationCount || 0) : 0,
-      startedAt: isResuming ? latestAttempt.startedAt : new Date().toISOString(),
-      violationLogs: isResuming ? (latestAttempt?.violationLogs || []) : [],
+      violationCount: resumedViolations,
+      startedAt: startedAt,
+      violationLogs: [],
       isGraded: false,
     };
 
-    // Update attempts
-    const updatedAttempts = attempts.map(a => a.id === newAttempt.id ? newAttempt : a);
-    if (!attempts.find(a => a.id === newAttempt.id)) {
-        updatedAttempts.push(newAttempt);
+    // Jika mulai baru, inisialisasi draf simpanan di localStorage
+    if (!localProgress) {
+      const initialProgress = {
+        attemptId: attemptId,
+        examId: exam.id,
+        studentId: currentUser.id,
+        questionsOrderIds: questionsOrder.map(q => q.id),
+        answers: {},
+        doubtQuestions: {},
+        currentQuestionIndex: 0,
+        remainingSeconds: exam.durationMinutes * 60,
+        violationCount: 0,
+        startedAt: startedAt,
+      };
+      localStorage.setItem(localKey, JSON.stringify(initialProgress));
     }
-    onUpdateAttempts(updatedAttempts);
 
+    // CATATAN: Tidak mengirim attempt in_progress ke Supabase / App attempts agar tidak muncul di riwayat guru saat belum selesai
     setActiveExam({ ...exam, questions: questionsOrder });
-    setCurrentAttempt(newAttempt);
-    setUserAnswers(newAttempt.answers || {});
-    setRemainingSeconds(exam.durationMinutes * 60);
+    setCurrentAttempt(inMemoryAttempt);
+    setUserAnswers(resumedAnswers);
+    setDoubtQuestions(resumedDoubts);
+    setRemainingSeconds(resumedSeconds);
     setElapsedMinutes(0);
-    setViolationCount(0);
-    setCurrentQuestionIndex(0);
+    setViolationCount(resumedViolations);
+    setCurrentQuestionIndex(Math.min(resumedIndex, questionsOrder.length - 1));
     isSubmittingRef.current = false;
     setIsSubmittingExam(false);
     setIsQuestionInfoOpen(false);
@@ -354,7 +423,12 @@ export default function SiswaPanel({
           triggerSubmitExam();
           return 0;
         }
-        return prev - 1;
+        const next = prev - 1;
+        // Simpan sisa detik waktu ujian ke localStorage setiap 5 detik
+        if (next % 5 === 0 && activeExam) {
+          saveActiveProgressToLocal({ remainingSeconds: next });
+        }
+        return next;
       });
 
       setElapsedMinutes((prev) => prev + 1 / 60);
@@ -363,53 +437,26 @@ export default function SiswaPanel({
     return () => clearInterval(timer);
   }, [activeExam, remainingSeconds, currentAttempt]);
 
-  // Watch for Guru resets from attempts prop
-  useEffect(() => {
-    if (activeExam && currentAttempt) {
-      const globalAttempt = attempts.find(a => a.id === currentAttempt.id);
-      if (globalAttempt) {
-        // If answers were cleared globally (i.e. Guru reset), but local still has them
-        if (Object.keys(globalAttempt.answers).length === 0 && Object.keys(userAnswers).length > 0) {
-          // Reset the local state to match the clean attempt
-          setUserAnswers({});
-          setCurrentAttempt(globalAttempt);
-          setCurrentQuestionIndex(0);
-          setRemainingSeconds(activeExam.durationMinutes * 60);
-          setElapsedMinutes(0);
-          setViolationCount(0);
-          setViolationWarningModal(null);
-          setDoubtQuestions({});
-        } else if (globalAttempt.status === 'in_progress' && currentAttempt.status === 'violation_disqualified') {
-          // If status was reset but maybe userAnswers is empty anyway
-          setCurrentAttempt(globalAttempt);
-          setViolationCount(0);
-          setViolationWarningModal(null);
-        }
-      }
-    }
-  }, [attempts, activeExam, currentAttempt, userAnswers]);
-
-  // 4. Update Answer for current question
+  // 4. Update Answer for current question (Hanya disimpan di LocalStorage perangkat siswa)
   const handleAnswerSelect = (questionId: string, answer: any) => {
-    const updated = { ...userAnswers, [questionId]: answer };
-    setUserAnswers(updated);
+    setUserAnswers((prev) => {
+      const updated = { ...prev, [questionId]: answer };
+      saveActiveProgressToLocal({ answers: updated, currentQuestionIndex });
+      return updated;
+    });
 
     if (currentAttempt) {
-      const updatedAttempt = { ...currentAttempt, answers: updated };
-      setCurrentAttempt(updatedAttempt);
-
-      // Sync to main attempts list
-      const updatedAttempts = attempts.map(a => a.id === updatedAttempt.id ? updatedAttempt : a);
-      if (!attempts.find(a => a.id === updatedAttempt.id)) {
-          updatedAttempts.push(updatedAttempt);
-      }
-      onUpdateAttempts(updatedAttempts);
+      setCurrentAttempt((prev) => (prev ? { ...prev, answers: { ...prev.answers, [questionId]: answer } } : null));
     }
   };
 
-  // Toggle doubt flag
+  // Toggle doubt flag (Tersimpan di LocalStorage)
   const handleToggleDoubt = (qId: string) => {
-    setDoubtQuestions((prev) => ({ ...prev, [qId]: !prev[qId] }));
+    setDoubtQuestions((prev) => {
+      const updated = { ...prev, [qId]: !prev[qId] };
+      saveActiveProgressToLocal({ doubtQuestions: updated });
+      return updated;
+    });
   };
 
   // 5. Submit Exam with Safe 1-2s Delay & Anti-Cheat Protection
@@ -537,20 +584,25 @@ export default function SiswaPanel({
         updatedAttempts.push(finalAttempt);
     }
 
-    // 1. Simpan segera ke localStorage lokal
+    // 1. Simpan segera ke localStorage riwayat attempts
     saveAttempts(updatedAttempts);
 
-    // 2. Simpan langsung ke Supabase database jika terkonfigurasi
+    // 2. Simpan langsung ke Supabase database jika terkonfigurasi (dikirim hanya saat klik selesai)
     try {
       await supabaseService.saveExamAttempt(finalAttempt);
     } catch (err) {
       console.warn('Gagal menyimpan attempt ke Supabase:', err);
     }
 
-    // 3. Jeda 1.6 detik (1-2 detik) agar proses transmisi jawaban selesai dengan aman
+    // 3. Bersihkan draf progres pengerjaan ujian aktif di localStorage
+    try {
+      localStorage.removeItem(getProgressStorageKey(currentUser.id, activeExam.id));
+    } catch (e) {}
+
+    // 4. Jeda 1.6 detik (1-2 detik) agar proses transmisi jawaban selesai dengan aman
     await new Promise((resolve) => setTimeout(resolve, 1600));
 
-    // 4. Update state React App
+    // 5. Update state React App (hanya saat ujian selesai)
     onUpdateAttempts(updatedAttempts);
 
     // Trigger confetti on good completion
@@ -736,7 +788,7 @@ export default function SiswaPanel({
                                 <span className="px-2.5 py-0.5 rounded-full text-[11px] font-bold bg-rose-100 text-rose-800">
                                   Terkunci (Pelanggaran)
                                 </span>
-                              ) : attempt?.status === 'in_progress' ? (
+                              ) : (attempt?.status === 'in_progress' || Boolean(localStorage.getItem(getProgressStorageKey(currentUser.id, exam.id)))) ? (
                                 <span className="px-2.5 py-0.5 rounded-full text-[11px] font-bold bg-amber-50 text-amber-800 border border-amber-200">
                                   Dapat Dilanjutkan
                                 </span>
@@ -839,7 +891,7 @@ export default function SiswaPanel({
                                 <ShieldAlert className="w-4 h-4 text-rose-600 shrink-0" />
                                 <span className="truncate">Terkunci (Minta Reset)</span>
                               </button>
-                            ) : attempt?.status === 'in_progress' ? (
+                            ) : (attempt?.status === 'in_progress' || Boolean(localStorage.getItem(getProgressStorageKey(currentUser.id, exam.id)))) ? (
                               <button
                                 id={`btn-start-exam-${exam.id}`}
                                 onClick={() => handleStartExam(exam)}
@@ -1597,7 +1649,7 @@ export default function SiswaPanel({
             <button
               type="button"
               disabled={isFirstQuestion}
-              onClick={() => setCurrentQuestionIndex((prev) => Math.max(0, prev - 1))}
+              onClick={() => handleNavigateQuestion(Math.max(0, currentQuestionIndex - 1))}
               className="px-4 py-2.5 bg-slate-100 hover:bg-slate-200 disabled:opacity-40 text-slate-700 font-bold rounded-xl text-xs flex items-center gap-1.5 transition cursor-pointer disabled:cursor-not-allowed"
             >
               <ChevronLeft className="w-4 h-4" />
@@ -1633,7 +1685,7 @@ export default function SiswaPanel({
             ) : (
               <button
                 type="button"
-                onClick={() => setCurrentQuestionIndex((prev) => Math.min(totalQ - 1, prev + 1))}
+                onClick={() => handleNavigateQuestion(Math.min(totalQ - 1, currentQuestionIndex + 1))}
                 className="px-5 py-2.5 bg-indigo-600 hover:bg-indigo-700 text-white font-bold rounded-xl text-xs flex items-center gap-1.5 transition cursor-pointer shadow-xs"
               >
                 <span>Selanjutnya</span>
@@ -1685,7 +1737,7 @@ export default function SiswaPanel({
                     <button
                       key={`${q.id}_${qIndex}`}
                       type="button"
-                      onClick={() => setCurrentQuestionIndex(qIndex)}
+                      onClick={() => handleNavigateQuestion(qIndex)}
                       className={`h-10 rounded-xl text-xs font-bold transition flex items-center justify-center cursor-pointer ${bgClass} ${
                         isCurrent ? 'ring-3 ring-indigo-500 ring-offset-1' : ''
                       }`}

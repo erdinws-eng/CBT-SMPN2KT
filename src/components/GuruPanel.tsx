@@ -1539,7 +1539,7 @@ export default function GuruPanel({
                     </div>
 
                     {(() => {
-                      const allStudentAttempts = [...attempts].reverse();
+                      const allStudentAttempts = [...attempts].filter(a => a.status === 'submitted' || a.status === 'violation_disqualified').reverse();
                       if (allStudentAttempts.length === 0) {
                         return (
                           <div className="py-8 text-center">
@@ -2563,8 +2563,8 @@ export default function GuruPanel({
         const activeExam = exams.find(e => e.id === activeExamId) || exams[0];
         const activeClass = riwayatSelectedClass || 'Semua Kelas';
 
-        // Seluruh riwayat percobaan ujian untuk paket asesmen ini
-        const examSubmittedAttempts = attempts.filter(a => a.examId === activeExamId);
+        // Seluruh riwayat ujian yang telah selesai dikumpulkan atau didiskualifikasi
+        const examSubmittedAttempts = attempts.filter(a => (a.status === 'submitted' || a.status === 'violation_disqualified') && a.examId === activeExamId);
         const uniqueClasses = Array.from(new Set(examSubmittedAttempts.map(a => a.studentClass).filter(Boolean))).sort();
 
         // If exam and class are selected, filter attempts for these
@@ -3201,6 +3201,7 @@ export default function GuruPanel({
       {isRiwayatModalOpen && selectedRiwayatStudent && (() => {
         const currentExamId = riwayatSelectedExamId || selectedExamId || exams[0]?.id;
         const studentAttempts = attempts.filter(a => 
+          (a.status === 'submitted' || a.status === 'violation_disqualified') &&
           a.examId === currentExamId &&
           a.studentId === selectedRiwayatStudent.studentId
         ).sort((a,b) => new Date(a.startedAt).getTime() - new Date(b.startedAt).getTime());
