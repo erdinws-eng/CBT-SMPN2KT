@@ -65,6 +65,7 @@ import {
   parseDocxTextQuestions,
 } from '../lib/excelExportImport';
 import { getSupabaseConfig } from '../lib/supabase';
+import { supabaseService } from '../services/supabaseService';
 
 import RekapPrintModal from './RekapPrintModal';
 
@@ -581,24 +582,20 @@ export default function GuruPanel({
     } else if (deleteConfirm.type === 'reset_attempt') {
       const attemptId = deleteConfirm.id;
       const studentName = deleteConfirm.title;
-      // Mark as submitted and clear answers so it counts as an attempt (dihitung) but student can retake
-      const updated = allAttempts.map((att) => {
-        if (att.id === attemptId) {
-          return {
-            ...att,
-            status: 'submitted' as const,
-            answers: {},
-            totalScore: 0,
-            totalEarnedPoints: 0,
-            scorePercentage: 0,
-            passedKkm: false,
-            submittedAt: new Date().toISOString(),
-          };
-        }
-        return att;
-      });
+      const targetAtt = allAttempts.find((a) => a.id === attemptId);
+      // Hapus data sesi ujian ini sehingga nama siswa hilang dari Riwayat Ujian dan siswa dapat mengulang dari awal
+      const updated = allAttempts.filter((att) => att.id !== attemptId);
       onUpdateAttempts(updated);
-      showToast('Ujian Direset', `Sesi ujian ${studentName} berhasil direset (dihitung 1 kali percobaan).`, 'delete');
+      if (getSupabaseConfig().isConfigured) {
+        supabaseService.deleteExamAttempt(attemptId);
+      }
+      if (targetAtt) {
+        try {
+          localStorage.removeItem(`cbt_exam_progress_${targetAtt.studentId}_${targetAtt.examId}`);
+        } catch (e) {}
+      }
+      setIsRiwayatModalOpen(false);
+      showToast('Ujian Direset', `Sesi ujian ${studentName} berhasil direset. Siswa dapat memulai ujian kembali dari awal.`, 'success');
     } else if (deleteConfirm.type === 'resume_attempt') {
       const attemptId = deleteConfirm.id;
       const studentName = deleteConfirm.title;
@@ -613,8 +610,13 @@ export default function GuruPanel({
         }
         return att;
       });
+      const updatedAtt = updated.find((a) => a.id === attemptId);
+      if (updatedAtt && getSupabaseConfig().isConfigured) {
+        supabaseService.saveExamAttempt(updatedAtt);
+      }
       onUpdateAttempts(updated);
-      showToast('Sesi Dilanjutkan', `Sesi ujian ${studentName} dapat dilanjutkan (jawaban tersimpan).`, 'success');
+      setIsRiwayatModalOpen(false);
+      showToast('Sesi Dilanjutkan', `Sesi ujian ${studentName} berhasil diaktifkan kembali. Siswa dapat melanjutkan pengerjaan.`, 'success');
     }
 
     setDeleteConfirm({ isOpen: false, id: '', title: '', type: 'exam' });

@@ -36,6 +36,7 @@ export default function App() {
   const prevSubjectsRef = useRef<Subject[]>(subjects);
   const prevExamsRef = useRef<Exam[]>(exams);
   const prevAttemptsRef = useRef<ExamAttempt[]>(attempts);
+  const deletedAttemptIdsRef = useRef<Set<string>>(new Set());
 
   const isFetchingRef = useRef(false);
 
@@ -60,20 +61,43 @@ export default function App() {
       if (sbExams) setExams(sanitizeExams(sbExams));
       if (sbAttempts) {
         setAttempts((prevAttempts) => {
-          // Merge sbAttempts with prevAttempts
-          // Jangan pernah menimpa attempt yang sudah berstatus 'submitted' atau 'violation_disqualified' dengan 'in_progress'
-          const merged = [...sbAttempts];
+          // Buat map dari server Supabase, buang yang sudah dihapus/direset
+          const serverMap = new Map<string, ExamAttempt>();
+          sbAttempts.forEach((a) => {
+            if (deletedAttemptIdsRef.current.has(a.id)) {
+              supabaseService.deleteExamAttempt(a.id);
+              return;
+            }
+            serverMap.set(a.id, a);
+          });
+
+          const merged: ExamAttempt[] = [];
+
           prevAttempts.forEach((local) => {
-            const index = merged.findIndex((m) => m.id === local.id);
-            if (index >= 0) {
-              if (local.status !== 'in_progress' && merged[index].status === 'in_progress') {
-                merged[index] = local;
-                supabaseService.saveExamAttempt(local);
-              }
-            } else {
+            if (deletedAttemptIdsRef.current.has(local.id)) return;
+
+            const server = serverMap.get(local.id);
+            if (!server) {
               merged.push(local);
+            } else {
+              // Jika lokal berstatus 'in_progress' (misal baru di-Lanjutkan oleh guru)
+              // pertahankan status in_progress lokal agar tidak ditimpa kembali
+              if (local.status === 'in_progress' && server.status === 'violation_disqualified') {
+                merged.push(local);
+                supabaseService.saveExamAttempt(local);
+              } else {
+                merged.push(server);
+              }
+              serverMap.delete(local.id);
             }
           });
+
+          serverMap.forEach((server) => {
+            if (!deletedAttemptIdsRef.current.has(server.id)) {
+              merged.push(server);
+            }
+          });
+
           return merged;
         });
       }
@@ -148,7 +172,10 @@ export default function App() {
       attempts.forEach((item) => supabaseService.saveExamAttempt(item));
       const currentIds = new Set(attempts.map(item => item.id));
       prevAttemptsRef.current.forEach(old => {
-        if (!currentIds.has(old.id)) supabaseService.deleteExamAttempt(old.id);
+        if (!currentIds.has(old.id)) {
+          deletedAttemptIdsRef.current.add(old.id);
+          supabaseService.deleteExamAttempt(old.id);
+        }
       });
     }
     prevAttemptsRef.current = attempts;
@@ -156,7 +183,20 @@ export default function App() {
 
   // Handler update attempts yang langsung menyimpan ke localStorage dan Supabase
   const handleUpdateAttempts = useCallback((newAttempts: ExamAttempt[]) => {
-    setAttempts(newAttempts);
+    // Cari dan catat attempt yang dihapus agar langsung dibersihkan dari Supabase
+    setAttempts((prev) => {
+      const newIds = new Set(newAttempts.map((item) => item.id));
+      prev.forEach((old) => {
+        if (!newIds.has(old.id)) {
+          deletedAttemptIdsRef.current.add(old.id);
+          if (getSupabaseConfig().isConfigured) {
+            supabaseService.deleteExamAttempt(old.id);
+          }
+        }
+      });
+      return newAttempts;
+    });
+
     saveAttempts(newAttempts);
     if (getSupabaseConfig().isConfigured) {
       newAttempts.forEach((item) => supabaseService.saveExamAttempt(item));
