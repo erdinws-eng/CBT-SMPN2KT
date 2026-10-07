@@ -130,6 +130,45 @@ export default function SiswaPanel({
     saveActiveProgressToLocal({ currentQuestionIndex: newIndex });
   };
 
+  // Sinkronisasi otomatis data ujian dari database Supabase ke localStorage browser HP siswa saat guru mengklik Lanjutkan
+  useEffect(() => {
+    if (activeExam) return; // Jangan timpa jika siswa sedang di dalam ruang ujian aktif
+
+    attempts.forEach((att) => {
+      if (att.studentId === currentUser.id && att.status === 'in_progress') {
+        const key = getProgressStorageKey(currentUser.id, att.examId);
+        const raw = localStorage.getItem(key);
+        let localData: any = {};
+        if (raw) {
+          try {
+            localData = JSON.parse(raw);
+          } catch (e) {}
+        }
+
+        // Tarik jawaban dari database yang tersimpan sebelum pelanggaran
+        const mergedAnswers = {
+          ...(localData.answers || {}),
+          ...(att.answers || {}),
+        };
+
+        const updatedLocal = {
+          ...localData,
+          attemptId: att.id,
+          examId: att.examId,
+          studentId: currentUser.id,
+          answers: mergedAnswers,
+          doubtQuestions: localData.doubtQuestions || att.doubtfulAnswers || {},
+          currentQuestionIndex: localData.currentQuestionIndex || 0,
+          startedAt: att.startedAt || localData.startedAt || new Date().toISOString(),
+          violationCount: 0,
+          lastPulledFromDatabaseAt: new Date().toISOString(),
+        };
+
+        localStorage.setItem(key, JSON.stringify(updatedLocal));
+      }
+    });
+  }, [attempts, currentUser.id, activeExam]);
+
   // 1. Enter Exam directly without token
   const handleStartExam = (exam: Exam) => {
     // Check existing attempts for this exam
@@ -150,9 +189,13 @@ export default function SiswaPanel({
       }
     }
 
-    if (latestAttempt && latestAttempt.status === 'violation_disqualified') {
+    // Cek apakah siswa berstatus terkunci karena pelanggaran (belum diizinkan lanjut oleh guru)
+    const isDisqualified = latestAttempt && latestAttempt.status === 'violation_disqualified';
+    const isResumedByTeacher = latestAttempt && latestAttempt.status === 'in_progress';
+
+    if (isDisqualified && !isResumedByTeacher) {
       alert(
-        'Ujian Anda saat ini terkunci karena terdeteksi pelanggaran. Silakan hubungi Pengawas/Guru di ruangan untuk meminta "Reset Ujian Siswa" agar Anda dapat membuka dan mengerjakan ujian kembali.'
+        'Ujian Anda saat ini terkunci karena terdeteksi pelanggaran. Silakan hubungi Pengawas/Guru di ruangan untuk meminta tombol "Lanjutkan Ujian" agar Anda dapat membuka dan mengerjakan ujian kembali.'
       );
       return;
     }
@@ -193,13 +236,21 @@ export default function SiswaPanel({
       questionsOrder.sort(() => Math.random() - 0.5);
     }
 
-    const resumedAnswers = localProgress?.answers || {};
-    const resumedDoubts = localProgress?.doubtQuestions || {};
+    // Periksa apakah ada data attempt in_progress di database (hasil guru klik Lanjutkan)
+    const dbAttempt = attempts.find(
+      (a) => a.examId === exam.id && a.studentId === currentUser.id && a.status === 'in_progress'
+    );
+
+    const dbAnswers = dbAttempt?.answers || {};
+    const localAnswers = localProgress?.answers || {};
+    // Tarik dan gabungkan jawaban dari database dengan lokal
+    const resumedAnswers = { ...localAnswers, ...dbAnswers };
+    const resumedDoubts = localProgress?.doubtQuestions || dbAttempt?.doubtfulAnswers || {};
     const resumedIndex = localProgress?.currentQuestionIndex || 0;
     const resumedSeconds = localProgress?.remainingSeconds !== undefined ? localProgress.remainingSeconds : (exam.durationMinutes * 60);
-    const resumedViolations = localProgress?.violationCount || 0;
-    const attemptId = localProgress?.attemptId || 'att_' + Date.now();
-    const startedAt = localProgress?.startedAt || new Date().toISOString();
+    const resumedViolations = 0; // Reset ke 0 saat dilanjutkan
+    const attemptId = dbAttempt?.id || localProgress?.attemptId || 'att_' + Date.now();
+    const startedAt = dbAttempt?.startedAt || localProgress?.startedAt || new Date().toISOString();
 
     const inMemoryAttempt: ExamAttempt = {
       id: attemptId,
@@ -225,22 +276,21 @@ export default function SiswaPanel({
       isGraded: false,
     };
 
-    // Jika mulai baru, inisialisasi draf simpanan di localStorage
-    if (!localProgress) {
-      const initialProgress = {
-        attemptId: attemptId,
-        examId: exam.id,
-        studentId: currentUser.id,
-        questionsOrderIds: questionsOrder.map(q => q.id),
-        answers: {},
-        doubtQuestions: {},
-        currentQuestionIndex: 0,
-        remainingSeconds: exam.durationMinutes * 60,
-        violationCount: 0,
-        startedAt: startedAt,
-      };
-      localStorage.setItem(localKey, JSON.stringify(initialProgress));
-    }
+    // Perbarui draf simpanan di localStorage HP siswa dengan jawaban yang ditarik
+    const updatedProgress = {
+      attemptId: attemptId,
+      examId: exam.id,
+      studentId: currentUser.id,
+      questionsOrderIds: questionsOrder.map(q => q.id),
+      answers: resumedAnswers,
+      doubtQuestions: resumedDoubts,
+      currentQuestionIndex: Math.min(resumedIndex, questionsOrder.length - 1),
+      remainingSeconds: resumedSeconds,
+      violationCount: 0,
+      startedAt: startedAt,
+      lastPulledFromDatabaseAt: new Date().toISOString(),
+    };
+    localStorage.setItem(localKey, JSON.stringify(updatedProgress));
 
     // CATATAN: Tidak mengirim attempt in_progress ke Supabase / App attempts agar tidak muncul di riwayat guru saat belum selesai
     setActiveExam({ ...exam, questions: questionsOrder });
@@ -330,7 +380,7 @@ export default function SiswaPanel({
       // Seketika catat pelanggaran dan tampilkan jendela modal pelanggaran
       setViolationCount(1);
       setViolationWarningModal(
-        `UJIAN DIHENTIKAN OTOMATIS KARENA PELANGGARAN!\n\nTerdeteksi: ${reason}.\nSesuai aturan ujian, jika terjadi pelanggaran maka ujian otomatis selesai tanpa peringatan sampai 3 kali.\n\nJika pelanggaran terjadi tanpa sengaja, silakan segera lapor ke Pengawas/Guru untuk melakukan "Reset Ujian Siswa" agar Anda dapat membuka dan mengerjakan kembali.`
+        `UJIAN DIHENTIKAN OTOMATIS KARENA PELANGGARAN!\n\nTerdeteksi: ${reason}.\nSeluruh lembar jawaban Anda otomatis tersimpan dan telah dikirim ke database pengawas.\n\nSilakan segera lapor ke Pengawas/Guru di ruangan untuk meminta tombol "Lanjutkan Ujian" agar Anda dapat membuka kembali dan melanjutkan pengerjaan dengan jawaban yang telah tersimpan di database.`
       );
 
       // Muncul jendela modal pelanggaran dan bunyi bip selama 1 - 1,5 detik, baru kemudian tampilan berpindah ke panel siswa
@@ -587,17 +637,26 @@ export default function SiswaPanel({
     // 1. Simpan segera ke localStorage riwayat attempts
     saveAttempts(updatedAttempts);
 
-    // 2. Simpan langsung ke Supabase database jika terkonfigurasi (dikirim hanya saat klik selesai)
+    // 2. Simpan langsung ke Supabase database jika terkonfigurasi (dikirim saat pelanggaran ATAU saat siswa selesai)
     try {
       await supabaseService.saveExamAttempt(finalAttempt);
     } catch (err) {
       console.warn('Gagal menyimpan attempt ke Supabase:', err);
     }
 
-    // 3. Bersihkan draf progres pengerjaan ujian aktif di localStorage
-    try {
-      localStorage.removeItem(getProgressStorageKey(currentUser.id, activeExam.id));
-    } catch (e) {}
+    // 3. Jika terjadi pelanggaran, pertahankan draf jawaban lokal agar siap dilanjutkan saat guru klik Lanjutkan
+    if (isDisqualified) {
+      saveActiveProgressToLocal({
+        answers: userAnswers,
+        currentQuestionIndex,
+        violationCount: Math.max(1, violationCount),
+      });
+    } else {
+      // Jika siswa sudah selesai normal, bersihkan draf progres pengerjaan di localStorage
+      try {
+        localStorage.removeItem(getProgressStorageKey(currentUser.id, activeExam.id));
+      } catch (e) {}
+    }
 
     // 4. Jeda 1.6 detik (1-2 detik) agar proses transmisi jawaban selesai dengan aman
     await new Promise((resolve) => setTimeout(resolve, 1600));
@@ -746,12 +805,15 @@ export default function SiswaPanel({
 
                   <div className="grid grid-cols-1 xl:grid-cols-2 2xl:grid-cols-3 gap-6">
                     {myExams.map((exam) => {
-                      // Find the latest attempt by sorting submittedAt or startedAt
+                      // Cari percobaan terkini dari database
                       const attempt = [...attempts].filter(
                         (a) => a.examId === exam.id && a.studentId === currentUser.id
                       ).sort((a, b) => new Date(b.startedAt).getTime() - new Date(a.startedAt).getTime())[0];
                       const isFinished = attempt?.status === 'submitted';
                       const isDisqualified = attempt?.status === 'violation_disqualified';
+                      const isResumedByTeacher = attempt?.status === 'in_progress';
+                      const hasLocalProgress = Boolean(localStorage.getItem(getProgressStorageKey(currentUser.id, exam.id)));
+                      const canResume = isResumedByTeacher || (hasLocalProgress && !isDisqualified);
                       const isPassed = (attempt?.scorePercentage || 0) >= exam.kkm;
 
                       const subjectColors = [
@@ -784,11 +846,11 @@ export default function SiswaPanel({
                                 >
                                   {isPassed ? 'TUNTAS KKM' : 'REMEDIAL'}
                                 </span>
-                              ) : isDisqualified ? (
+                              ) : isDisqualified && !isResumedByTeacher ? (
                                 <span className="px-2.5 py-0.5 rounded-full text-[11px] font-bold bg-rose-100 text-rose-800">
                                   Terkunci (Pelanggaran)
                                 </span>
-                              ) : (attempt?.status === 'in_progress' || Boolean(localStorage.getItem(getProgressStorageKey(currentUser.id, exam.id)))) ? (
+                              ) : canResume ? (
                                 <span className="px-2.5 py-0.5 rounded-full text-[11px] font-bold bg-amber-50 text-amber-800 border border-amber-200">
                                   Dapat Dilanjutkan
                                 </span>
@@ -878,20 +940,20 @@ export default function SiswaPanel({
                                   </div>
                                 )}
                               </div>
-                            ) : isDisqualified ? (
+                            ) : isDisqualified && !isResumedByTeacher ? (
                               <button
                                 type="button"
                                 onClick={() =>
                                   alert(
-                                    'Ujian Anda terkunci karena pelanggaran. Silakan minta Pengawas / Guru di ruangan untuk menekan tombol "Reset" pada tabel pemantauan agar Anda dapat melanjutkan pengerjaan kembali.'
+                                    'Ujian Anda saat ini terkunci karena terdeteksi pelanggaran. Silakan minta Pengawas / Guru di ruangan untuk menekan tombol "Lanjutkan" pada tabel pemantauan agar Anda dapat membuka dan melanjutkan ujian kembali.'
                                   )
                                 }
                                 className="w-full py-2.5 px-4 bg-rose-100 hover:bg-rose-200 text-rose-800 font-bold text-xs rounded-xl flex items-center justify-center gap-2 border border-rose-300 transition cursor-pointer"
                               >
                                 <ShieldAlert className="w-4 h-4 text-rose-600 shrink-0" />
-                                <span className="truncate">Terkunci (Minta Reset)</span>
+                                <span className="truncate">Terkunci (Minta Izin Guru)</span>
                               </button>
-                            ) : (attempt?.status === 'in_progress' || Boolean(localStorage.getItem(getProgressStorageKey(currentUser.id, exam.id)))) ? (
+                            ) : canResume ? (
                               <button
                                 id={`btn-start-exam-${exam.id}`}
                                 onClick={() => handleStartExam(exam)}
