@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
 import {
   Sparkles,
@@ -96,10 +96,16 @@ export default function GuruPanel({
   onLogout,
   onRefreshData,
 }: GuruPanelProps) {
-  // Jika ada ujian spesifik milik guru ini, utamakan. Namun untuk monitoring / pengawas ruangan, sertakan seluruh ujian aktif agar tidak ada siswa yang luput
-  const teacherExams = allExams.filter(e => e.teacherId === currentUser.id);
-  const exams = teacherExams.length > 0 ? teacherExams : allExams;
-  const attempts = allAttempts.filter(a => exams.some(e => e.id === a.examId) || allExams.some(e => e.id === a.examId));
+  // Filter paket ujian secara ketat HANYA milik akun guru yang sedang login (dipisah per akun guru)
+  const isTeacherExam = (e: Exam) =>
+    e.teacherId === currentUser.id ||
+    (Boolean(currentUser.name) && Boolean(e.teacherName) && e.teacherName.trim().toLowerCase() === currentUser.name.trim().toLowerCase());
+
+  const exams = allExams.filter(isTeacherExam);
+  const teacherExamIds = new Set(exams.map((e) => e.id));
+
+  // Riwayat ujian siswa juga dipisah secara ketat: HANYA pengerjaan untuk paket ujian milik guru ini
+  const attempts = allAttempts.filter((a) => teacherExamIds.has(a.examId));
   const [isSidebarOpen, setIsSidebarOpen] = useState(true);
   const [isRefreshing, setIsRefreshing] = useState(false);
   const [activeTab, setActiveTab] = useState<'dashboard' | 'jadwal' | 'bank_soal' | 'rekap' | 'evaluasi' | 'riwayat_siswa'>('dashboard');
@@ -114,9 +120,20 @@ export default function GuruPanel({
   const [studentToDeleteFromRiwayat, setStudentToDeleteFromRiwayat] = useState<{studentId: string, studentName: string, studentNisn: string} | null>(null);
   const [confirmingAttemptId, setConfirmingAttemptId] = useState<string | null>(null);
 
-  // Siswa yang saat ini terkunci karena pelanggaran (membutuhkan izin pengawas)
+  // Sinkronisasi otomatis selectedExamId jika paket ujian berubah atau akun berganti
+  useEffect(() => {
+    if (exams.length > 0) {
+      if (!selectedExamId || !exams.some((e) => e.id === selectedExamId)) {
+        setSelectedExamId(exams[0].id);
+      }
+    } else {
+      setSelectedExamId('');
+    }
+  }, [exams, selectedExamId]);
+
+  // Siswa yang saat ini terkunci karena pelanggaran (pada paket ujian milik guru ini)
   const disqualifiedAttempts = allAttempts.filter(
-    (a) => a.status === 'violation_disqualified' && (exams.some(e => e.id === a.examId) || allExams.some(e => e.id === a.examId))
+    (a) => a.status === 'violation_disqualified' && teacherExamIds.has(a.examId)
   );
 
   // Handler sinkronisasi database instan atas permintaan Guru / Pengawas
@@ -353,13 +370,18 @@ export default function GuruPanel({
     setTimeout(() => setSuccessMessage(''), 4500);
   };
 
-  const availableExamsList = allExams.length > 0 ? allExams : exams;
+  const availableExamsList = exams;
   const selectedExam =
     availableExamsList.find((e) => e.id === selectedExamId) ||
     availableExamsList.find((e) => e.id === riwayatSelectedExamId) ||
-    availableExamsList[0];
-  const allExamAttempts = attempts.filter((a) => a.examId === selectedExam?.id).sort((a, b) => a.studentName.localeCompare(b.studentName));
-  const examAttempts = attempts.filter((a) => a.examId === selectedExam?.id && (a.status === 'submitted' || a.status === 'violation_disqualified')).sort((a, b) => a.studentName.localeCompare(b.studentName));
+    availableExamsList[0] ||
+    null;
+  const allExamAttempts = selectedExam
+    ? attempts.filter((a) => a.examId === selectedExam.id).sort((a, b) => a.studentName.localeCompare(b.studentName))
+    : [];
+  const examAttempts = selectedExam
+    ? attempts.filter((a) => a.examId === selectedExam.id && (a.status === 'submitted' || a.status === 'violation_disqualified')).sort((a, b) => a.studentName.localeCompare(b.studentName))
+    : [];
   const uniqueRekapClasses = Array.from(new Set(examAttempts.map((a) => a.studentClass).filter(Boolean))).sort();
   const filteredRekapAttempts = examAttempts.filter((a) => rekapClassFilter === 'Semua Kelas' || a.studentClass === rekapClassFilter);
 
@@ -1557,79 +1579,91 @@ export default function GuruPanel({
                       </button>
                     </div>
 
-                    <div className="divide-y divide-slate-100 mt-3">
-                      {exams.map((exam) => {
-                        const qCount = exam.questions.length;
-                        const attCount = attempts.filter((a) => a.examId === exam.id).length;
-                        const isSelected = exam.id === selectedExamId;
+                    {exams.length === 0 ? (
+                      <div className="py-8 text-center">
+                        <div className="w-12 h-12 rounded-2xl bg-indigo-50 text-indigo-400 flex items-center justify-center mx-auto mb-3">
+                          <Calendar className="w-6 h-6" />
+                        </div>
+                        <p className="font-bold text-xs text-slate-800">Belum Ada Paket Ujian</p>
+                        <p className="text-[11px] text-slate-500 mt-0.5 max-w-xs mx-auto">
+                          Anda belum memiliki paket ujian untuk akun ini ({currentUser.name}). Klik &quot;Ujian Baru&quot; untuk membuat.
+                        </p>
+                      </div>
+                    ) : (
+                      <div className="divide-y divide-slate-100 mt-3">
+                        {exams.map((exam) => {
+                          const qCount = exam.questions.length;
+                          const attCount = attempts.filter((a) => a.examId === exam.id).length;
+                          const isSelected = exam.id === selectedExamId;
 
-                        return (
-                          <div
-                            key={exam.id}
-                            className={`py-3.5 px-2 rounded-xl transition flex flex-col sm:flex-row sm:items-center justify-between gap-3 ${
-                              isSelected ? 'bg-indigo-50/60' : 'hover:bg-slate-50'
-                            }`}
-                          >
-                            <div className="min-w-0 flex-1">
-                              <div className="flex items-center gap-2 mb-1">
-                                <span className="text-[10px] font-bold px-2 py-0.5 rounded-md bg-indigo-100 text-indigo-800">
-                                  {exam.subjectName}
-                                </span>
-                                <span className={`text-[10px] font-bold px-2 py-0.5 rounded-md ${
-                                  exam.isActive !== false ? 'bg-emerald-100 text-emerald-800' : 'bg-slate-100 text-slate-700'
-                                }`}>
-                                  {exam.isActive !== false ? 'Aktif' : 'Nonaktif'}
-                                </span>
+                          return (
+                            <div
+                              key={exam.id}
+                              className={`py-3.5 px-2 rounded-xl transition flex flex-col sm:flex-row sm:items-center justify-between gap-3 ${
+                                isSelected ? 'bg-indigo-50/60' : 'hover:bg-slate-50'
+                              }`}
+                            >
+                              <div className="min-w-0 flex-1">
+                                <div className="flex items-center gap-2 mb-1">
+                                  <span className="text-[10px] font-bold px-2 py-0.5 rounded-md bg-indigo-100 text-indigo-800">
+                                    {exam.subjectName}
+                                  </span>
+                                  <span className={`text-[10px] font-bold px-2 py-0.5 rounded-md ${
+                                    exam.isActive !== false ? 'bg-emerald-100 text-emerald-800' : 'bg-slate-100 text-slate-700'
+                                  }`}>
+                                    {exam.isActive !== false ? 'Aktif' : 'Nonaktif'}
+                                  </span>
+                                </div>
+                                <h4 className="text-sm font-bold text-slate-900 truncate">
+                                  {exam.title}
+                                </h4>
+                                <div className="flex flex-wrap items-center gap-x-3 text-[11px] text-slate-500 mt-1">
+                                  <span>Durasi: {exam.durationMinutes} mnt</span>
+                                  <span>•</span>
+                                  <span>KKM: {exam.kkm}</span>
+                                  <span>•</span>
+                                  <span>{qCount} Soal</span>
+                                  <span>•</span>
+                                  <span>{attCount} Peserta</span>
+                                </div>
                               </div>
-                              <h4 className="text-sm font-bold text-slate-900 truncate">
-                                {exam.title}
-                              </h4>
-                              <div className="flex flex-wrap items-center gap-x-3 text-[11px] text-slate-500 mt-1">
-                                <span>Durasi: {exam.durationMinutes} mnt</span>
-                                <span>•</span>
-                                <span>KKM: {exam.kkm}</span>
-                                <span>•</span>
-                                <span>{qCount} Soal</span>
-                                <span>•</span>
-                                <span>{attCount} Peserta</span>
+
+                              <div className="flex items-center gap-1.5 shrink-0 self-end sm:self-center">
+                                <button
+                                  onClick={() => {
+                                    setSelectedExamId(exam.id);
+                                    setActiveTab('bank_soal');
+                                  }}
+                                  className="px-2.5 py-1.5 bg-white hover:bg-slate-100 border border-slate-200 text-slate-700 rounded-lg text-xs font-bold transition cursor-pointer flex items-center gap-1"
+                                  title="Kelola Soal Ujian"
+                                >
+                                  <BookOpen className="w-3.5 h-3.5 text-indigo-600" />
+                                  <span>Soal</span>
+                                </button>
+                                <button
+                                  onClick={() => {
+                                    setSelectedExamId(exam.id);
+                                    setActiveTab('riwayat_siswa');
+                                  }}
+                                  className="px-2.5 py-1.5 bg-white hover:bg-slate-100 border border-slate-200 text-slate-700 rounded-lg text-xs font-bold transition cursor-pointer flex items-center gap-1"
+                                  title="Buka Riwayat Ujian"
+                                >
+                                  <History className="w-3.5 h-3.5 text-emerald-600" />
+                                  <span>Riwayat</span>
+                                </button>
+                                <button
+                                  onClick={() => handleOpenEditExam(exam)}
+                                  className="p-1.5 bg-white hover:bg-slate-100 border border-slate-200 text-slate-600 rounded-lg text-xs transition cursor-pointer"
+                                  title="Edit Jadwal & Pengaturan"
+                                >
+                                  <Edit2 className="w-3.5 h-3.5" />
+                                </button>
                               </div>
                             </div>
-
-                            <div className="flex items-center gap-1.5 shrink-0 self-end sm:self-center">
-                              <button
-                                onClick={() => {
-                                  setSelectedExamId(exam.id);
-                                  setActiveTab('bank_soal');
-                                }}
-                                className="px-2.5 py-1.5 bg-white hover:bg-slate-100 border border-slate-200 text-slate-700 rounded-lg text-xs font-bold transition cursor-pointer flex items-center gap-1"
-                                title="Kelola Soal Ujian"
-                              >
-                                <BookOpen className="w-3.5 h-3.5 text-indigo-600" />
-                                <span>Soal</span>
-                              </button>
-                              <button
-                                onClick={() => {
-                                  setSelectedExamId(exam.id);
-                                  setActiveTab('riwayat_siswa');
-                                }}
-                                className="px-2.5 py-1.5 bg-white hover:bg-slate-100 border border-slate-200 text-slate-700 rounded-lg text-xs font-bold transition cursor-pointer flex items-center gap-1"
-                                title="Buka Riwayat Ujian"
-                              >
-                                <History className="w-3.5 h-3.5 text-emerald-600" />
-                                <span>Riwayat</span>
-                              </button>
-                              <button
-                                onClick={() => handleOpenEditExam(exam)}
-                                className="p-1.5 bg-white hover:bg-slate-100 border border-slate-200 text-slate-600 rounded-lg text-xs transition cursor-pointer"
-                                title="Edit Jadwal & Pengaturan"
-                              >
-                                <Edit2 className="w-3.5 h-3.5" />
-                              </button>
-                            </div>
-                          </div>
-                        );
-                      })}
-                    </div>
+                          );
+                        })}
+                      </div>
+                    )}
 
                     <div className="pt-3 border-t border-slate-100 flex items-center justify-between text-xs text-slate-500">
                       <span>Total {exams.length} paket asesmen</span>
@@ -2562,6 +2596,25 @@ export default function GuruPanel({
 
       {/* TAB 4: REKAPITULASI & LAPORAN NILAI */}
       {activeTab === 'rekap' && (() => {
+        if (!selectedExam || exams.length === 0) {
+          return (
+            <div className="bg-white rounded-2xl border border-dashed border-slate-300 p-12 text-center">
+              <Award className="w-12 h-12 text-slate-300 mx-auto mb-3" />
+              <h3 className="font-bold text-slate-700 text-sm">Belum Ada Paket Ujian</h3>
+              <p className="text-xs text-slate-500 max-w-md mx-auto mt-1 mb-4">
+                Buat paket ujian baru untuk dapat melihat rekapitulasi nilai dan mengunduh laporan nilai siswa.
+              </p>
+              <button
+                onClick={() => setIsCreateExamModalOpen(true)}
+                className="px-4 py-2 bg-indigo-600 hover:bg-indigo-700 text-white font-bold text-xs rounded-xl inline-flex items-center gap-1.5 cursor-pointer shadow-xs"
+              >
+                <Plus className="w-4 h-4" />
+                <span>Buat Ujian Baru</span>
+              </button>
+            </div>
+          );
+        }
+
         // Group submitted attempts by student for 1-to-1 sync with Riwayat Ujian Siswa
         const rekapStudentGroups: Record<string, {
           studentId: string;
@@ -2736,19 +2789,42 @@ export default function GuruPanel({
 
       {/* TAB 6: RIWAYAT & REMEDIAL SISWA */}
       {activeTab === 'riwayat_siswa' && (() => {
-        const availableExamsList = exams.length > 0 ? exams : allExams;
+        if (exams.length === 0) {
+          return (
+            <div className="bg-white rounded-2xl border border-dashed border-slate-300 p-12 text-center">
+              <div className="w-14 h-14 rounded-2xl bg-indigo-50 text-indigo-500 flex items-center justify-center mx-auto mb-3">
+                <History className="w-7 h-7" />
+              </div>
+              <h3 className="text-base font-extrabold text-slate-900 mb-1">
+                Belum Ada Riwayat Ujian
+              </h3>
+              <p className="text-xs text-slate-500 max-w-md mx-auto mb-5">
+                Belum ada paket ujian untuk akun guru Anda ({currentUser.name || currentUser.username}). Riwayat ujian siswa akan otomatis muncul di sini setelah siswa mengerjakan ujian yang Anda buat.
+              </p>
+              <button
+                onClick={() => setIsCreateExamModalOpen(true)}
+                className="inline-flex items-center gap-2 px-4 py-2 bg-indigo-600 hover:bg-indigo-700 text-white rounded-xl text-xs font-bold transition shadow-xs cursor-pointer"
+              >
+                <Plus className="w-4 h-4" />
+                <span>Buat Ujian Baru</span>
+              </button>
+            </div>
+          );
+        }
+
+        const availableExamsList = exams;
         const isExamValid = riwayatSelectedExamId === 'all' || availableExamsList.some(e => e.id === riwayatSelectedExamId);
         const activeExamId = isExamValid ? (riwayatSelectedExamId || 'all') : 'all';
         const activeExam = availableExamsList.find(e => e.id === activeExamId);
         const activeClass = riwayatSelectedClass || 'Semua Kelas';
 
-        // Seluruh riwayat ujian yang ada di sistem (untuk validasi tombol Hapus Semua)
-        const totalSubmittedInSystem = allAttempts.filter(a =>
+        // Seluruh riwayat ujian akun guru ini yang ada di sistem (untuk validasi tombol Hapus Semua)
+        const totalSubmittedInSystem = attempts.filter(a =>
           a.status === 'submitted' || a.status === 'violation_disqualified'
         ).length;
 
-        // Seluruh riwayat ujian yang telah selesai dikumpulkan atau didiskualifikasi (baik per ujian maupun seluruh ujian)
-        const examSubmittedAttempts = allAttempts.filter(a =>
+        // Seluruh riwayat ujian akun guru ini yang telah selesai dikumpulkan atau didiskualifikasi
+        const examSubmittedAttempts = attempts.filter(a =>
           (a.status === 'submitted' || a.status === 'violation_disqualified') &&
           (activeExamId === 'all' || a.examId === activeExamId)
         );
@@ -2994,6 +3070,29 @@ export default function GuruPanel({
       })()}
       {/* TAB 5: EVALUASI SOAL & HASIL UJIAN */}
       {activeTab === 'evaluasi' && (() => {
+        if (!selectedExam || exams.length === 0) {
+          return (
+            <div className="bg-white rounded-2xl border border-dashed border-slate-300 p-12 text-center">
+              <div className="w-14 h-14 rounded-2xl bg-indigo-50 text-indigo-500 flex items-center justify-center mx-auto mb-3">
+                <FileText className="w-7 h-7" />
+              </div>
+              <h3 className="text-base font-extrabold text-slate-900 mb-1">
+                Belum Ada Paket Ujian
+              </h3>
+              <p className="text-xs text-slate-500 max-w-md mx-auto mb-5">
+                Belum ada paket ujian untuk akun guru Anda ({currentUser.name || currentUser.username}). Buat ujian terlebih dahulu untuk mengevaluasi jawaban siswa.
+              </p>
+              <button
+                onClick={() => setIsCreateExamModalOpen(true)}
+                className="inline-flex items-center gap-2 px-4 py-2 bg-indigo-600 hover:bg-indigo-700 text-white rounded-xl text-xs font-bold transition shadow-xs cursor-pointer"
+              >
+                <Plus className="w-4 h-4" />
+                <span>Buat Ujian Baru</span>
+              </button>
+            </div>
+          );
+        }
+
         // Group submitted attempts by student so each student appears once with their latest attempt
         const evalStudentMap: Record<string, ExamAttempt> = {};
         filteredRekapAttempts.filter(a => (a.status === 'submitted' || a.status === 'violation_disqualified')).forEach(att => {
@@ -3445,6 +3544,8 @@ export default function GuruPanel({
                   id="btn-delete-all-student-attempts"
                   onClick={() => {
                     const newAttempts = allAttempts.filter(a => {
+                      // Jangan sentuh ujian milik akun guru lain
+                      if (!teacherExamIds.has(a.examId)) return true;
                       if (a.studentId !== selectedRiwayatStudent.studentId) return true;
                       if (!isAllExams && a.examId !== riwayatSelectedExamId) return true;
                       return false;
@@ -3574,24 +3675,24 @@ export default function GuruPanel({
 
       {/* MODAL HAPUS SEMUA RIWAYAT */}
       {isDeleteAllRiwayatModalOpen && (() => {
-        const availableExamsList = exams.length > 0 ? exams : allExams;
+        const availableExamsList = exams;
         const isExamValid = riwayatSelectedExamId === 'all' || availableExamsList.some(e => e.id === riwayatSelectedExamId);
         const activeExamId = isExamValid ? (riwayatSelectedExamId || 'all') : 'all';
         const activeExam = availableExamsList.find(e => e.id === activeExamId);
         const activeClass = riwayatSelectedClass || 'Semua Kelas';
 
-        const totalSubmittedAttempts = allAttempts.filter(
+        const totalSubmittedAttempts = attempts.filter(
           (a) => a.status === 'submitted' || a.status === 'violation_disqualified'
         );
 
-        // Filter daftar attempt yang akan dihapus sesuai filter ujian & kelas yang sedang dipilih
+        // Filter daftar attempt milik guru ini yang akan dihapus sesuai filter ujian & kelas yang sedang dipilih
         const filteredToDeleteList = totalSubmittedAttempts.filter(a => {
           if (activeExamId !== 'all' && a.examId !== activeExamId) return false;
           if (activeClass !== 'Semua Kelas' && a.studentClass !== activeClass) return false;
           return true;
         });
 
-        // Jika filter saat ini menghasilkan 0 tetapi ada data lain di sistem, sediakan opsi hapus seluruhnya
+        // Jika filter saat ini menghasilkan 0 tetapi ada data lain milik guru ini di sistem, sediakan opsi hapus seluruhnya
         const toDeleteList = filteredToDeleteList.length > 0 ? filteredToDeleteList : totalSubmittedAttempts;
         const countToDelete = toDeleteList.length;
         const isFilterSpecific = filteredToDeleteList.length > 0 && (activeExamId !== 'all' || activeClass !== 'Semua Kelas');
@@ -3662,7 +3763,7 @@ export default function GuruPanel({
       {/* MODAL HAPUS RIWAYAT SISWA TERTENTU */}
       {studentToDeleteFromRiwayat && (() => {
         const activeExamId = riwayatSelectedExamId || 'all';
-        const availableExamsList = allExams.length > 0 ? allExams : exams;
+        const availableExamsList = exams;
         const activeExam = availableExamsList.find(e => e.id === activeExamId);
 
         return (
@@ -3703,9 +3804,12 @@ export default function GuruPanel({
                 <button
                   id="btn-confirm-delete-student-row"
                   onClick={() => {
-                    const newAttempts = allAttempts.filter(
-                      a => !((activeExamId === 'all' || a.examId === activeExamId) && a.studentId === studentToDeleteFromRiwayat.studentId)
-                    );
+                    const newAttempts = allAttempts.filter(a => {
+                      if (!teacherExamIds.has(a.examId)) return true;
+                      if (a.studentId !== studentToDeleteFromRiwayat.studentId) return true;
+                      if (activeExamId !== 'all' && a.examId !== activeExamId) return true;
+                      return false;
+                    });
                     onUpdateAttempts(newAttempts);
                     showToast('Riwayat Siswa Dihapus', `Data riwayat ${studentToDeleteFromRiwayat.studentName} berhasil dihapus.`, 'delete');
                     setStudentToDeleteFromRiwayat(null);

@@ -622,48 +622,82 @@ export async function parseDocxTextQuestions(file: File): Promise<Question[]> {
     rawText = await file.text();
   }
 
-  // 1. Cek apakah ada tabel di file docx/HTML yang memuat butir soal
+  // 1. Ekstrak butir soal baik dari tabel maupun teks bebas di dokumen
+  let tableQuestions: Question[] = [];
   if (html && html.includes('<table')) {
-    const tableQuestions = parseHtmlTablesToQuestions(html);
-    if (tableQuestions.length > 0) {
-      return tableQuestions;
-    }
+    tableQuestions = parseHtmlTablesToQuestions(html);
   }
 
   // 2. Normalisasi dokumen ke baris-baris terstruktur
   const lines = html ? htmlToNormalizedLines(html) : rawTextToNormalizedLines(rawText);
 
-  // 3. Ekstrak butir soal
-  return parseNormalizedLinesToQuestions(lines);
+  // 3. Ekstrak butir soal dari teks berurutan
+  const textQuestions = parseNormalizedLinesToQuestions(lines);
+
+  // 4. Pilih hasil terbaik: jika teks mendeteksi soal lebih banyak atau sama dan valid, utamakan teks; sebaliknya tabel
+  if (textQuestions.length >= tableQuestions.length && textQuestions.length > 0) {
+    return textQuestions;
+  }
+  if (tableQuestions.length > 0) {
+    return tableQuestions;
+  }
+  return textQuestions;
 }
 
 // Normalisasi HTML ke array baris terstruktur
 function htmlToNormalizedLines(html: string): string[] {
   let processed = html;
 
-  // Konversi <ol> dan <ul> ke item bernomor huruf A., B., C., D...
+  // Konversi <ol> dengan cerdas: bedakan daftar soal (1, 2, 3...) vs daftar pilihan jawaban (A, B, C, D...)
   processed = processed.replace(/<ol[^>]*>([\s\S]*?)<\/ol>/gi, (_, inner) => {
-    let letterCode = 65;
-    return inner.replace(/<li[^>]*>([\s\S]*?)<\/li>/gi, (__: string, liText: string) => {
-      const clean = liText.replace(/<[^>]+>/g, '').trim();
-      if (/^[A-Ea-e][\.\)]\s*/.test(clean)) {
-        return `<p>${clean}</p>`;
-      }
-      const letter = String.fromCharCode(letterCode++);
-      return `<p>${letter}. ${clean}</p>`;
-    });
+    const liMatches = Array.from(inner.matchAll(/<li[^>]*>([\s\S]*?)<\/li>/gi)).map((m: any) => m[1]);
+    if (liMatches.length === 0) return inner;
+
+    const cleanItems = liMatches.map((m: string) => m.replace(/<[^>]+>/g, '').trim());
+
+    // Cek apakah item sudah memiliki nomor soal (misal: "1.", "2)") atau huruf (misal: "A.", "B)")
+    const hasExistingNumbers = cleanItems.some((it: string) => /^\d+[\.\)]\s*/.test(it));
+    const hasExistingLetters = cleanItems.some((it: string) => /^[A-Ea-e][\.\)\:\-\–\—\s]\s*/.test(it));
+
+    if (hasExistingNumbers || hasExistingLetters) {
+      return cleanItems.map((it: string) => `<p>${it}</p>`).join('\n');
+    }
+
+    // Jika lebih dari 5 item atau berakhiran '?' / ':' atau kalimat panjang, ini daftar butir pertanyaan
+    const isQuestionList =
+      cleanItems.length > 5 ||
+      cleanItems.some((it: string) => it.length > 70 || it.endsWith('?') || it.endsWith(':') || it.includes('...'));
+
+    if (isQuestionList) {
+      return cleanItems.map((it: string, idx: number) => `<p>${idx + 1}. ${it}</p>`).join('\n');
+    }
+
+    // Jika 2-5 item pendek, ini adalah daftar opsi pilihan jawaban A, B, C, D...
+    return cleanItems.map((it: string, idx: number) => {
+      const letter = String.fromCharCode(65 + idx);
+      return `<p>${letter}. ${it}</p>`;
+    }).join('\n');
   });
 
+  // Konversi <ul> (bulleted list)
   processed = processed.replace(/<ul[^>]*>([\s\S]*?)<\/ul>/gi, (_, inner) => {
-    let letterCode = 65;
-    return inner.replace(/<li[^>]*>([\s\S]*?)<\/li>/gi, (__: string, liText: string) => {
-      const clean = liText.replace(/<[^>]+>/g, '').trim();
-      if (/^[A-Ea-e][\.\)]\s*/.test(clean)) {
-        return `<p>${clean}</p>`;
+    const liMatches = Array.from(inner.matchAll(/<li[^>]*>([\s\S]*?)<\/li>/gi)).map((m: any) => m[1]);
+    if (liMatches.length === 0) return inner;
+    const cleanItems = liMatches.map((m: string) => m.replace(/<[^>]+>/g, '').trim());
+
+    return cleanItems.map((it: string, idx: number) => {
+      if (/^[A-Ea-e][\.\)\:\-\–\—\s]\s*/.test(it)) {
+        return `<p>${it}</p>`;
       }
-      const letter = String.fromCharCode(letterCode++);
-      return `<p>${letter}. ${clean}</p>`;
-    });
+      if (/^\d+[\.\)]\s*/.test(it)) {
+        return `<p>${it}</p>`;
+      }
+      if (cleanItems.length <= 5 && !it.endsWith('?') && it.length < 80) {
+        const letter = String.fromCharCode(65 + idx);
+        return `<p>${letter}. ${it}</p>`;
+      }
+      return `<p>${it}</p>`;
+    }).join('\n');
   });
 
   // Konversi tabel baris menjadi paragraf
@@ -692,14 +726,17 @@ function rawTextToNormalizedLines(raw: string): string[] {
   const normalized: string[] = [];
 
   for (const line of rawLines) {
-    const trimmed = line.trim();
+    let trimmed = line.trim();
     if (!trimmed) continue;
 
+    // Bersihkan karakter bullet di awal jika diikuti nomor soal atau opsi huruf
+    trimmed = trimmed.replace(/^[•\*\-\–\—\u2022\u25E6\u2043\u2219]\s*(?=[A-Ea-e\d][\.\)\:\-\–\—\s])/, '');
+
     // Cek jika nomor soal dan opsi berada dalam satu baris (misal: "1. Soal... A. Opsi 1 B. Opsi 2")
-    const qNumMatch = trimmed.match(/^(\d+[\.\)]\s+)([\s\S]+)/);
+    const qNumMatch = trimmed.match(/^((?:(?:no|soal|nomor)\.?\s*)?\d+[\.\)\:\-]\s+)([\s\S]+)/i);
     if (qNumMatch) {
       const afterNum = qNumMatch[2];
-      const firstOptMatch = afterNum.search(/(?:^|\s+|[\t])(?=[A-Ea-e][\.\)]|\([A-Ea-e]\)|\[[A-Ea-e]\])/);
+      const firstOptMatch = afterNum.search(/(?:^|\s+|[\t])(?=[A-Ea-e][\.\)\:\-\–\—]|\([A-Ea-e]\)|\[[A-Ea-e]\])/);
       if (firstOptMatch !== -1 && firstOptMatch > 0) {
         const promptPart = afterNum.substring(0, firstOptMatch).trim();
         const optionsPart = afterNum.substring(firstOptMatch).trim();
@@ -711,7 +748,7 @@ function rawTextToNormalizedLines(raw: string): string[] {
     }
 
     // Cek jika opsi ditulis mendatar (misal: "A. Pilihan 1   B. Pilihan 2   C. ...")
-    const optionMatches = trimmed.match(/(?:^|\s+|[\t])(?=[A-Ea-e][\.\)]|\([A-Ea-e]\)|\[[A-Ea-e]\])/g);
+    const optionMatches = trimmed.match(/(?:^|\s+|[\t])(?=[A-Ea-e][\.\)\:\-\–\—]|\([A-Ea-e]\)|\[[A-Ea-e]\])/g);
     if (optionMatches && optionMatches.length >= 2) {
       const subOpts = splitHorizontalOptions(trimmed);
       normalized.push(...subOpts);
@@ -723,12 +760,24 @@ function rawTextToNormalizedLines(raw: string): string[] {
   return normalized;
 }
 
-// Pemecah opsi mendatar (A. ... B. ...)
+// Pemecah opsi mendatar (A. ... B. ...) dan penyeragaman format
 function splitHorizontalOptions(str: string): string[] {
-  return str
-    .split(/(?:^|\s+|[\t])(?=[A-Ea-e][\.\)]|\([A-Ea-e]\)|\[[A-Ea-e]\])/)
+  const parts = str
+    .split(/(?:^|\s+|[\t])(?=[A-Ea-e][\.\)\:\-\–\—]|\([A-Ea-e]\)|\[[A-Ea-e]\])/)
     .map((s) => s.trim())
     .filter(Boolean);
+
+  return parts.map((p, idx) => {
+    const clean = p.replace(/^[•\*\-\–\—\u2022\u25E6\u2043\u2219]?\s*/, '').trim();
+    const m = clean.match(/^[\(\[]?([A-Ea-e])[\)\]]?[\.\)\:\-\–\—\s]\s*(.*)/);
+    if (m) {
+      const letter = m[1].toUpperCase();
+      const text = m[2].trim();
+      return `${letter}. ${text}`;
+    }
+    const defaultLetter = String.fromCharCode(65 + idx);
+    return `${defaultLetter}. ${clean}`;
+  });
 }
 
 // Parser Tabel Word / HTML
@@ -763,7 +812,7 @@ function parseHtmlTablesToQuestions(html: string): Question[] {
 
     if (rows.length < 2) continue;
 
-    const headers = rows[0].map((h) => h.toLowerCase());
+    const headers = rows[0].map((h) => h.toLowerCase().trim());
     let colType = -1;
     let colPrompt = -1;
     let colA = -1;
@@ -778,19 +827,29 @@ function parseHtmlTablesToQuestions(html: string): Question[] {
 
     headers.forEach((h, idx) => {
       if (h.includes('bentuk') || h.includes('tipe') || h.includes('jenis')) colType = idx;
-      else if (h.includes('soal') || h.includes('pertanyaan') || h.includes('butir')) colPrompt = idx;
-      else if (h === 'a' || h === 'opsi a' || h === 'pilihan a') colA = idx;
-      else if (h === 'b' || h === 'opsi b' || h === 'pilihan b') colB = idx;
-      else if (h === 'c' || h === 'opsi c' || h === 'pilihan c') colC = idx;
-      else if (h === 'd' || h === 'opsi d' || h === 'pilihan d') colD = idx;
-      else if (h === 'e' || h === 'opsi e' || h === 'pilihan e') colE = idx;
+      else if (h.includes('soal') || h.includes('pertanyaan') || h.includes('butir') || h.includes('deskripsi')) colPrompt = idx;
+      else if (/^(?:opsi|pilihan|pil|jawaban)?\s*a[\.\)]?$/i.test(h)) colA = idx;
+      else if (/^(?:opsi|pilihan|pil|jawaban)?\s*b[\.\)]?$/i.test(h)) colB = idx;
+      else if (/^(?:opsi|pilihan|pil|jawaban)?\s*c[\.\)]?$/i.test(h)) colC = idx;
+      else if (/^(?:opsi|pilihan|pil|jawaban)?\s*d[\.\)]?$/i.test(h)) colD = idx;
+      else if (/^(?:opsi|pilihan|pil|jawaban)?\s*e[\.\)]?$/i.test(h)) colE = idx;
       else if (h.includes('pilihan') || h.includes('opsi')) colOptions = idx;
-      else if (h.includes('kunci') || h.includes('jawaban') || h.includes('answer')) colKey = idx;
+      else if (h.includes('kunci') || h.includes('jawaban benar') || h.includes('answer') || h === 'kunci') colKey = idx;
       else if (h.includes('bobot') || h.includes('poin') || h.includes('skor')) colPoints = idx;
       else if (h.includes('pembahasan') || h.includes('penjelasan')) colExplanation = idx;
     });
 
-    if (colPrompt !== -1 || (rows[0].length >= 2 && rows.length >= 2)) {
+    // Validasi ketat: abaikan tabel metadata kop sekolah
+    const hasQuestionHeaders = colPrompt !== -1 || colKey !== -1 || colA !== -1 || colOptions !== -1 || colType !== -1;
+    const isMetadataTable = headers.some((h) =>
+      h.includes('nama sekolah') || h.includes('mata pelajaran') || h.includes('tahun ajaran') ||
+      h.includes('hari/tanggal') || h.includes('waktu') || h.includes('penyusun')
+    );
+    if (isMetadataTable && !hasQuestionHeaders) {
+      continue;
+    }
+
+    if (hasQuestionHeaders || (rows[0].length >= 3 && rows.length >= 2)) {
       for (let r = 1; r < rows.length; r++) {
         const row = rows[r];
         if (row.length === 0 || row.every((c) => !c)) continue;
@@ -802,27 +861,32 @@ function parseHtmlTablesToQuestions(html: string): Question[] {
         const explanation = colExplanation !== -1 ? row[colExplanation] || undefined : undefined;
 
         const options: string[] = [];
-        if (colA !== -1 && row[colA]) options.push(`A. ${row[colA].replace(/^[A-Ea-e][\.\)]\s*/, '')}`);
-        if (colB !== -1 && row[colB]) options.push(`B. ${row[colB].replace(/^[A-Ea-e][\.\)]\s*/, '')}`);
-        if (colC !== -1 && row[colC]) options.push(`C. ${row[colC].replace(/^[A-Ea-e][\.\)]\s*/, '')}`);
-        if (colD !== -1 && row[colD]) options.push(`D. ${row[colD].replace(/^[A-Ea-e][\.\)]\s*/, '')}`);
-        if (colE !== -1 && row[colE]) options.push(`E. ${row[colE].replace(/^[A-Ea-e][\.\)]\s*/, '')}`);
+        if (colA !== -1 && row[colA]) options.push(`A. ${row[colA].replace(/^[A-Ea-e][\.\)\:\-\–\—\s]\s*/, '')}`);
+        if (colB !== -1 && row[colB]) options.push(`B. ${row[colB].replace(/^[A-Ea-e][\.\)\:\-\–\—\s]\s*/, '')}`);
+        if (colC !== -1 && row[colC]) options.push(`C. ${row[colC].replace(/^[A-Ea-e][\.\)\:\-\–\—\s]\s*/, '')}`);
+        if (colD !== -1 && row[colD]) options.push(`D. ${row[colD].replace(/^[A-Ea-e][\.\)\:\-\–\—\s]\s*/, '')}`);
+        if (colE !== -1 && row[colE]) options.push(`E. ${row[colE].replace(/^[A-Ea-e][\.\)\:\-\–\—\s]\s*/, '')}`);
 
         if (options.length === 0 && colOptions !== -1 && row[colOptions]) {
-          const splitOpts = row[colOptions].split('\n').map((s) => s.trim()).filter(Boolean);
-          splitOpts.forEach((so, idx) => {
-            const letter = String.fromCharCode(65 + idx);
-            options.push(so.startsWith(letter + '.') ? so : `${letter}. ${so}`);
-          });
+          const splitOpts = splitHorizontalOptions(row[colOptions]);
+          if (splitOpts.length >= 2) {
+            options.push(...splitOpts);
+          } else {
+            const rawSplit = row[colOptions].split('\n').map((s) => s.trim()).filter(Boolean);
+            rawSplit.forEach((so, idx) => {
+              const letter = String.fromCharCode(65 + idx);
+              options.push(so.startsWith(letter + '.') ? so : `${letter}. ${so}`);
+            });
+          }
         }
 
         if (options.length === 0 && prompt.includes('\n')) {
           const subLines = prompt.split('\n').map((l) => l.trim()).filter(Boolean);
           const cleanPromptParts: string[] = [];
           for (const sl of subLines) {
-            if (/^[A-Ea-e][\.\)]\s*/.test(sl)) {
+            if (/^[A-Ea-e][\.\)\:\-\–\—\s]\s*/.test(sl)) {
               const letter = sl.charAt(0).toUpperCase();
-              options.push(`${letter}. ${sl.replace(/^[A-Ea-e][\.\)]\s*/, '')}`);
+              options.push(`${letter}. ${sl.replace(/^[A-Ea-e][\.\)\:\-\–\—\s]\s*/, '')}`);
             } else {
               cleanPromptParts.push(sl);
             }
@@ -876,15 +940,8 @@ function parseNormalizedLinesToQuestions(lines: string[]): Question[] {
           currentPrompt.toUpperCase().includes('ULANGAN HARIAN'));
 
       if (!isHeader) {
-        // Jika opsi kosong tetapi ada baris-baris kandidat (misal Word me-render list tanpa huruf A-E)
-        // dan kunci adalah A, B, C, D, E atau tipe adalah pilihan ganda
-        if (
-          currentOptions.length === 0 &&
-          candidateOptionLines.length >= 2 &&
-          candidateOptionLines.length <= 5 &&
-          (/^[A-Ea-e][\.\)]?$/.test(currentKey.trim()) ||
-            /pilihan\s*ganda|pg/i.test(currentRawType || defaultSectionType))
-        ) {
+        // Jika opsi belum terisi dan ada 2-5 baris pendek di bawah pertanyaan, jadikan opsi A, B, C...
+        if (currentOptions.length === 0 && candidateOptionLines.length >= 2 && candidateOptionLines.length <= 5) {
           candidateOptionLines.forEach((col, idx) => {
             const letter = String.fromCharCode(65 + idx);
             currentOptions.push(`${letter}. ${col}`);
@@ -917,9 +974,9 @@ function parseNormalizedLinesToQuestions(lines: string[]): Question[] {
     const trimmed = lines[i].trim();
     if (!trimmed) continue;
 
-    // Header Bagian (misal: "BAGIAN I: SOAL PILIHAN GANDA", "BAGIAN II: URAIAN")
+    // Header Bagian (misal: "BAGIAN I: SOAL PILIHAN GANDA", "I. PILIHAN GANDA", "SOAL PILIHAN GANDA", "URAIAN")
     const sectionMatch = trimmed.match(
-      /^(?:bagian|bab|kategori|romawi)?\s*[I|V|X|A-E][\.\:]\s*(?:soal\s+)?(pilihan\s+ganda\s+kompleks|pilihan\s+ganda|pgk|pg|uraian|essay|esai|benar\s*[-–\s]*\s*salah|menjodohkan|isian)/i
+      /^(?:bagian|bab|kategori|romawi)?\s*[I|V|X|A-E\d]?[\.\:\-\–\s]*\s*(?:soal\s+)?(pilihan\s+ganda\s+kompleks|pilihan\s+ganda|pgk|pg|uraian|essay|esai|benar\s*[-–\s]*\s*salah|menjodohkan|isian)/i
     );
     if (sectionMatch) {
       defaultSectionType = sectionMatch[1].toLowerCase();
@@ -947,15 +1004,15 @@ function parseNormalizedLinesToQuestions(lines: string[]): Question[] {
       continue;
     }
 
-    // Kunci Jawaban (misal: "Kunci: B", "Kunci Jawaban: A, C", "Jawaban: Nusantara", "Kunci = Benar")
+    // Kunci Jawaban (misal: "Kunci: B", "Kunci Jawaban: A, C", "Jawaban: Nusantara", "Kunci = Benar", "Kunci: B. Ribosom")
     const keyMatch = trimmed.match(/^(?:kunci\s*jawaban|kunci|jawaban\s*benar|jawaban|answer|ans)\s*[:=]\s*(.*)/i);
     if (keyMatch) {
       currentKey = keyMatch[1].trim();
       continue;
     }
 
-    // Nomor Soal Baru (misal: "1. ", "2) ", "No. 1. ", "[1] ")
-    const numMatch = trimmed.match(/^(?:no\.?\s*)?(\d+)[\.\)]\s*(.*)/i);
+    // Nomor Soal Baru (misal: "1. ", "2) ", "No. 1. ", "Soal 1: ", "1: ")
+    const numMatch = trimmed.match(/^(?:(?:no|soal|nomor)\.?\s*)?(\d+)[\.\)\:\-]\s*(.*)/i);
     if (numMatch) {
       pushCurrent();
       let textAfterNum = numMatch[2].trim();
@@ -974,15 +1031,26 @@ function parseNormalizedLinesToQuestions(lines: string[]): Question[] {
       continue;
     }
 
-    // Opsi Pilihan Jawaban (misal: "A. ...", "B) ...", "(A) ...", "[A] ...", "Opsi A: ...", "Pilihan A: ...")
+    // Opsi Pilihan Jawaban (misal: "A. ...", "B) ...", "(A) ...", "[A] ...", "• A. ...", "A: ...")
     const optMatch =
-      trimmed.match(/^(?:(?:pilihan|opsi|jawaban)\s+)?([A-Ea-e])[\.\)\:\-]\s*(.*)/i) ||
-      trimmed.match(/^[\(\[]([A-Ea-e])[\)\]]\s*(.*)/i);
+      trimmed.match(/^(?:[•\*\-\–\—\u2022\u25E6\u2043\u2219]?\s*)?(?:(?:pilihan|opsi|jawaban|pil)\s+)?([A-Ea-e])[\.\)\:\-\–\—\s]\s*(.*)/i) ||
+      trimmed.match(/^(?:[•\*\-\–\—\u2022\u25E6\u2043\u2219]?\s*)?[\(\[]([A-Ea-e])[\)\]]\s*(.*)/i);
 
     if (optMatch) {
       const letter = optMatch[1].toUpperCase();
       const optText = optMatch[2].trim();
-      currentOptions.push(`${letter}. ${optText}`);
+
+      // Cek jika baris ini berisi beberapa opsi sekaligus secara horizontal (misal: "A. Opsi 1   B. Opsi 2...")
+      const hasHorizontalSubOpts = /(?:^|\s+|[\t])(?=[B-Eb-e][\.\)\:\-\–\—]|\([B-Eb-e]\)|\[[B-Eb-e]\])/i.test(optText);
+      if (hasHorizontalSubOpts) {
+        const allInLine = splitHorizontalOptions(`${letter}. ${optText}`);
+        allInLine.forEach((o) => {
+          const cleanO = o.trim();
+          if (cleanO) currentOptions.push(cleanO);
+        });
+      } else {
+        currentOptions.push(`${letter}. ${optText}`);
+      }
       candidateOptionLines = [];
       continue;
     }
@@ -1019,8 +1087,21 @@ function buildQuestionModel({
   points: number;
   explanation?: string;
 }): Question {
-  const finalType = detectQuestionType(rawType, options, key, prompt);
-  let finalOptions = options && options.length > 0 ? options : undefined;
+  // 1. Ekstrak opsi dari prompt LEBIH DULU jika options kosong atau < 2
+  let workingOptions = [...(options || [])];
+  let workingPrompt = prompt;
+
+  if (workingOptions.length < 2) {
+    const extracted = extractOptionsFromPromptText(workingPrompt);
+    if (extracted.options.length >= 2) {
+      workingOptions = extracted.options;
+      workingPrompt = extracted.prompt;
+    }
+  }
+
+  // 2. Deteksi tipe soal dengan opsi yang sudah diekstrak
+  const finalType = detectQuestionType(rawType, workingOptions, key, workingPrompt);
+  let finalOptions = workingOptions && workingOptions.length > 0 ? workingOptions : undefined;
   let finalCorrectAnswer: string | undefined = undefined;
   let finalCorrectAnswers: string[] | undefined = undefined;
   let matchingPairs: { premise: string; match: string }[] | undefined = undefined;
@@ -1030,32 +1111,27 @@ function buildQuestionModel({
   const cleanKey = (key || '').replace(/^[\(\[]/, '').replace(/[\)\]]$/, '').trim();
 
   if (finalType === 'pilihan_ganda') {
-    // Jika opsi kosong atau kurang dari 2, cek apakah opsi tertulis di dalam prompt
+    // Pastikan minimal ada opsi jawaban
     if (!finalOptions || finalOptions.length < 2) {
-      const extracted = extractOptionsFromPromptText(prompt);
-      if (extracted.options.length >= 2) {
-        finalOptions = extracted.options;
-        prompt = extracted.prompt;
-      }
+      finalOptions = ['A. Pilihan A', 'B. Pilihan B', 'C. Pilihan C', 'D. Pilihan D'];
     }
 
     // Sesuaikan format jawaban benar dengan teks opsi jika ada
-    if (cleanKey && finalOptions && finalOptions.length > 0) {
-      const keyLetter = cleanKey.charAt(0).toUpperCase();
+    const keyLetterMatch = cleanKey.match(/^[\(\[]?([A-Ea-e])[\)\]]?(?:[\.\)\:\-\–\—\s].*|$)/);
+    if (keyLetterMatch && finalOptions && finalOptions.length > 0) {
+      const keyLetter = keyLetterMatch[1].toUpperCase();
       const matchedOpt = finalOptions.find(
         (o) => o.toUpperCase().startsWith(keyLetter + '.') || o.toUpperCase().startsWith(keyLetter + ')')
       );
-      finalCorrectAnswer = matchedOpt || (cleanKey.length === 1 ? `${keyLetter}.` : cleanKey);
+      finalCorrectAnswer = matchedOpt || `${keyLetter}.`;
+    } else if (cleanKey) {
+      finalCorrectAnswer = cleanKey;
     } else {
-      finalCorrectAnswer = cleanKey || (finalOptions && finalOptions[0]) || 'A.';
+      finalCorrectAnswer = finalOptions[0] || 'A.';
     }
   } else if (finalType === 'pilihan_ganda_kompleks') {
     if (!finalOptions || finalOptions.length < 2) {
-      const extracted = extractOptionsFromPromptText(prompt);
-      if (extracted.options.length >= 2) {
-        finalOptions = extracted.options;
-        prompt = extracted.prompt;
-      }
+      finalOptions = ['A. Opsi A', 'B. Opsi B', 'C. Opsi C', 'D. Opsi D'];
     }
 
     // Jawaban ganda lebih dari satu opsi, misal: "A, C" atau "A; C" atau "A dan C"
@@ -1071,11 +1147,11 @@ function buildQuestionModel({
       });
       finalCorrectAnswer = finalCorrectAnswers[0];
     } else {
-      finalCorrectAnswers = finalOptions ? [finalOptions[0]] : ['A'];
+      finalCorrectAnswers = finalOptions ? [finalOptions[0]] : ['A.'];
       finalCorrectAnswer = finalCorrectAnswers[0];
     }
   } else if (finalType === 'benar_salah') {
-    const stmts = parseTrueFalseStatementsFromText(prompt);
+    const stmts = parseTrueFalseStatementsFromText(workingPrompt);
     if (stmts.length > 1) {
       trueFalseStatements = stmts;
       finalCorrectAnswer = stmts[0].answer;
@@ -1084,7 +1160,7 @@ function buildQuestionModel({
       finalCorrectAnswer = isSalah ? 'Salah' : 'Benar';
     }
   } else if (finalType === 'menjodohkan') {
-    matchingPairs = parseMatchingPairsFromText(prompt, options);
+    matchingPairs = parseMatchingPairsFromText(workingPrompt, options);
     if (!matchingPairs || matchingPairs.length === 0) {
       matchingPairs = [
         { premise: 'Domain 1', match: 'Kodomain 1' },
@@ -1102,7 +1178,7 @@ function buildQuestionModel({
   return {
     id,
     type: finalType,
-    prompt: prompt.trim(),
+    prompt: workingPrompt.trim(),
     points: points || 10,
     options: finalOptions,
     correctAnswer: finalCorrectAnswer,
@@ -1171,12 +1247,12 @@ function detectQuestionType(
     return 'pilihan_ganda_kompleks';
   }
 
-  // Kunci berupa huruf tunggal A-E (misal: "A", "B", "C", "D", "E")
-  if (/^[A-Ea-e][\.\)]?$/i.test(trimmedKey)) {
+  // Kunci diawali huruf pilihan A-E (misal: "A", "B.", "C) Ribosom", "[A]", "(B)", "Kunci: B", "D. Mitokondria")
+  if (/^[\(\[]?[A-Ea-e][\)\]]?(?:[\.\)\:\-\–\—\s].*|$)/i.test(trimmedKey)) {
     return 'pilihan_ganda';
   }
 
-  // Jika memiliki minimal 2 opsi jawaban
+  // Jika memiliki minimal 2 opsi jawaban -> otomatis Pilihan Ganda
   if (options && options.length >= 2) {
     return 'pilihan_ganda';
   }
@@ -1196,20 +1272,20 @@ function detectQuestionType(
     return 'isi_kosong';
   }
 
-  // Jika kunci adalah kata/frasa pendek (< 30 karakter) dan pertanyaan berupa pertanyaan spesifik
-  if (trimmedKey && trimmedKey.length > 0 && trimmedKey.length <= 30 && !trimmedKey.includes('\n')) {
+  // Jika kunci adalah kata/frasa pendek (< 40 karakter) dan pertanyaan berupa pertanyaan spesifik
+  if (trimmedKey && trimmedKey.length > 0 && trimmedKey.length <= 40 && !trimmedKey.includes('\n')) {
     if (/^(siapakah|apakah|sebutkan satu|berapakah|di mana|kapan)\b/i.test(prompt) || prompt.includes('...')) {
       return 'isian';
     }
   }
 
-  // Default jika tanpa opsi dan jawaban berupa penjelasan panjang
+  // Default jika tanpa opsi dan tanpa kunci huruf
   return 'essay';
 }
 
 // Ekstrak opsi jika tertulis di baris pertanyaan
 function extractOptionsFromPromptText(prompt: string): { prompt: string; options: string[] } {
-  const match = prompt.search(/(?:^|\s+)(?=[A-Ea-e][\.\)]|\([A-Ea-e]\))/);
+  const match = prompt.search(/(?:^|\s+|[\t\n])(?=[A-Ea-e][\.\)\:\-\–\—]|\([A-Ea-e]\)|\[[A-Ea-e]\])/);
   if (match !== -1 && match > 0) {
     const cleanPrompt = prompt.substring(0, match).trim();
     const optsPart = prompt.substring(match).trim();
