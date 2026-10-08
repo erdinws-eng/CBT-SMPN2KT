@@ -16,6 +16,8 @@ const STORAGE_KEYS = {
   SETTINGS: 'cbt_smp_settings_v1',
   AUDIT_LOGS: 'cbt_smp_audit_logs_v1',
   CURRENT_USER: 'cbt_smp_current_user_v1',
+  DELETED_EXAMS: 'cbt_smp_deleted_exams_v1',
+  DELETED_ATTEMPTS: 'cbt_smp_deleted_attempts_v1',
 };
 
 export const INITIAL_SCHOOL_SETTINGS: SchoolSettings = {
@@ -374,18 +376,61 @@ export function sanitizeExams(exams: Exam[]): Exam[] {
   }));
 }
 
+export function getDeletedExamIds(): Set<string> {
+  try {
+    const raw = localStorage.getItem(STORAGE_KEYS.DELETED_EXAMS);
+    return raw ? new Set(JSON.parse(raw)) : new Set();
+  } catch {
+    return new Set();
+  }
+}
+
+export function addDeletedExamIds(ids: string[]) {
+  try {
+    const current = getDeletedExamIds();
+    ids.forEach((id) => current.add(id));
+    localStorage.setItem(STORAGE_KEYS.DELETED_EXAMS, JSON.stringify(Array.from(current)));
+  } catch (e) {
+    console.error('Error saving deleted exam ids:', e);
+  }
+}
+
+export function getDeletedAttemptIds(): Set<string> {
+  try {
+    const raw = localStorage.getItem(STORAGE_KEYS.DELETED_ATTEMPTS);
+    return raw ? new Set(JSON.parse(raw)) : new Set();
+  } catch {
+    return new Set();
+  }
+}
+
+export function addDeletedAttemptIds(ids: string[]) {
+  try {
+    const current = getDeletedAttemptIds();
+    ids.forEach((id) => current.add(id));
+    localStorage.setItem(STORAGE_KEYS.DELETED_ATTEMPTS, JSON.stringify(Array.from(current)));
+  } catch (e) {
+    console.error('Error saving deleted attempt ids:', e);
+  }
+}
+
 export function getStoredExams(): Exam[] {
   try {
+    const deletedIds = getDeletedExamIds();
     const raw = localStorage.getItem(STORAGE_KEYS.EXAMS);
     const parsed = raw ? JSON.parse(raw) : INITIAL_EXAMS;
-    return sanitizeExams(parsed);
+    const filtered = (parsed || []).filter((ex: Exam) => !deletedIds.has(ex.id));
+    return sanitizeExams(filtered);
   } catch {
-    return sanitizeExams(INITIAL_EXAMS);
+    const deletedIds = getDeletedExamIds();
+    return sanitizeExams(INITIAL_EXAMS.filter((ex) => !deletedIds.has(ex.id)));
   }
 }
 export function saveStoredExams(exams: Exam[]) {
   try {
-    const sanitized = sanitizeExams(exams);
+    const deletedIds = getDeletedExamIds();
+    const filtered = exams.filter((ex) => !deletedIds.has(ex.id));
+    const sanitized = sanitizeExams(filtered);
     localStorage.setItem(STORAGE_KEYS.EXAMS, JSON.stringify(sanitized));
   } catch (e) {
     console.error('Error saving exams to localStorage:', e);
@@ -394,13 +439,17 @@ export function saveStoredExams(exams: Exam[]) {
 
 export function getStoredAttempts(): ExamAttempt[] {
   try {
+    const deletedAttemptIds = getDeletedAttemptIds();
+    const deletedExamIds = getDeletedExamIds();
     const raw = localStorage.getItem(STORAGE_KEYS.ATTEMPTS);
     if (raw) {
       const parsed: ExamAttempt[] = JSON.parse(raw);
-      // Hapus data mock awal (attempt_1) agar tidak nyangkut saat dashboard kosong
-      const filtered = parsed.filter(a => a.id !== 'attempt_1');
+      // Hapus data mock awal (attempt_1) serta attempt/ujian yang telah dihapus
+      const filtered = parsed.filter(
+        (a) => a.id !== 'attempt_1' && !deletedAttemptIds.has(a.id) && !deletedExamIds.has(a.examId)
+      );
       if (filtered.length !== parsed.length) {
-         localStorage.setItem(STORAGE_KEYS.ATTEMPTS, JSON.stringify(filtered));
+        localStorage.setItem(STORAGE_KEYS.ATTEMPTS, JSON.stringify(filtered));
       }
       return filtered;
     }
@@ -411,7 +460,12 @@ export function getStoredAttempts(): ExamAttempt[] {
 }
 export function saveStoredAttempts(attempts: ExamAttempt[]) {
   try {
-    localStorage.setItem(STORAGE_KEYS.ATTEMPTS, JSON.stringify(attempts));
+    const deletedAttemptIds = getDeletedAttemptIds();
+    const deletedExamIds = getDeletedExamIds();
+    const filtered = attempts.filter(
+      (a) => !deletedAttemptIds.has(a.id) && !deletedExamIds.has(a.examId)
+    );
+    localStorage.setItem(STORAGE_KEYS.ATTEMPTS, JSON.stringify(filtered));
   } catch (e) {
     console.error('Error saving attempts to localStorage:', e);
   }

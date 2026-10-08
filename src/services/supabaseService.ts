@@ -258,9 +258,14 @@ export const supabaseService = {
     if (!supabase) return false;
 
     try {
+      // 1. Hapus pengerjaan siswa yang terhubung dengan paket ujian ini terlebih dahulu
+      // agar tidak terbentur constraint foreign key PostgreSQL
+      await supabase.from('exam_attempts').delete().eq('exam_id', examId);
+      // 2. Hapus paket ujian dari tabel exams
       const { error } = await supabase.from('exams').delete().eq('id', examId);
       return !error;
     } catch (err) {
+      console.error('Error deleting exam from Supabase:', err);
       return false;
     }
   },
@@ -310,37 +315,64 @@ export const supabaseService = {
     const supabase = getSupabase();
     if (!supabase) return false;
 
+    const sanitizedPayload = {
+      id: String(attempt.id || 'att_' + Date.now()),
+      exam_id: String(attempt.examId || ''),
+      exam_title: String(attempt.examTitle || 'Ujian'),
+      subject_name: String(attempt.subjectName || '-'),
+      student_id: String(attempt.studentId || ''),
+      student_name: String(attempt.studentName || 'Siswa'),
+      student_nisn: String(attempt.studentNisn || ''),
+      student_class: String(attempt.studentClass || ''),
+      started_at: attempt.startedAt || new Date().toISOString(),
+      submitted_at: attempt.submittedAt || (attempt.status === 'submitted' || attempt.status === 'violation_disqualified' ? new Date().toISOString() : null),
+      answers: attempt.answers || {},
+      doubtful_answers: attempt.doubtfulAnswers || {},
+      scores: attempt.scores || {},
+      total_score: Number.isFinite(attempt.totalScore) ? Number(attempt.totalScore) : 0,
+      max_possible_score: Number.isFinite(attempt.maxPossibleScore) ? Number(attempt.maxPossibleScore) : 100,
+      total_earned_points: Number.isFinite(attempt.totalEarnedPoints) ? Number(attempt.totalEarnedPoints) : (Number.isFinite(attempt.totalScore) ? Number(attempt.totalScore) : 0),
+      total_max_points: Number.isFinite(attempt.totalMaxPoints) ? Number(attempt.totalMaxPoints) : (Number.isFinite(attempt.maxPossibleScore) ? Number(attempt.maxPossibleScore) : 100),
+      score_percentage: Number.isFinite(attempt.scorePercentage) ? Number(attempt.scorePercentage) : 0,
+      passed_kkm: Boolean(attempt.passedKkm),
+      status: attempt.status || 'in_progress',
+      violation_count: Number.isFinite(attempt.violationCount) ? Number(attempt.violationCount) : 0,
+      violation_logs: Array.isArray(attempt.violationLogs) ? attempt.violationLogs : [],
+      teacher_feedback: String(attempt.teacherFeedback || ''),
+      is_graded: Boolean(attempt.isGraded),
+    };
+
+    const timeoutPromise = (ms: number) =>
+      new Promise<never>((_, reject) =>
+        setTimeout(() => reject(new Error('Supabase network timeout')), ms)
+      );
+
     try {
-      const { error } = await supabase.from('exam_attempts').upsert({
-        id: attempt.id,
-        exam_id: attempt.examId,
-        exam_title: attempt.examTitle,
-        subject_name: attempt.subjectName,
-        student_id: attempt.studentId,
-        student_name: attempt.studentName,
-        student_nisn: attempt.studentNisn,
-        student_class: attempt.studentClass,
-        started_at: attempt.startedAt,
-        submitted_at: attempt.submittedAt || null,
-        answers: attempt.answers,
-        doubtful_answers: attempt.doubtfulAnswers || {},
-        scores: attempt.scores || {},
-        total_score: attempt.totalScore,
-        max_possible_score: attempt.maxPossibleScore,
-        total_earned_points: attempt.totalEarnedPoints || 0,
-        total_max_points: attempt.totalMaxPoints || 100,
-        score_percentage: attempt.scorePercentage,
-        passed_kkm: attempt.passedKkm,
-        status: attempt.status,
-        violation_count: attempt.violationCount,
-        violation_logs: attempt.violationLogs,
-        teacher_feedback: attempt.teacherFeedback || '',
-        is_graded: attempt.isGraded,
-      });
-      return !error;
+      // Coba pertama dengan timeout 6 detik
+      await Promise.race([
+        (async () => {
+          const { error } = await supabase.from('exam_attempts').upsert(sanitizedPayload);
+          if (error) throw error;
+        })(),
+        timeoutPromise(6000),
+      ]);
+      return true;
     } catch (err) {
-      console.error('Error saving exam attempt to Supabase:', err);
-      return false;
+      console.warn('Upsert attempt ke Supabase tertunda/gagal, mencoba ulang...', err);
+      try {
+        await new Promise((res) => setTimeout(res, 500));
+        await Promise.race([
+          (async () => {
+            const { error: retryError } = await supabase.from('exam_attempts').upsert(sanitizedPayload);
+            if (retryError) throw retryError;
+          })(),
+          timeoutPromise(6000),
+        ]);
+        return true;
+      } catch (retryErr) {
+        console.error('Retry upsert attempt gagal:', retryErr);
+        return false;
+      }
     }
   },
 
@@ -352,6 +384,23 @@ export const supabaseService = {
       const { error } = await supabase.from('exam_attempts').delete().eq('id', attemptId);
       return !error;
     } catch (err) {
+      return false;
+    }
+  },
+
+  async deleteExamAttempts(attemptIds: string[]): Promise<boolean> {
+    const supabase = getSupabase();
+    if (!supabase || attemptIds.length === 0) return true;
+
+    try {
+      const chunkSize = 100;
+      for (let i = 0; i < attemptIds.length; i += chunkSize) {
+        const chunk = attemptIds.slice(i, i + chunkSize);
+        await supabase.from('exam_attempts').delete().in('id', chunk);
+      }
+      return true;
+    } catch (err) {
+      console.error('Error batch deleting exam attempts from Supabase:', err);
       return false;
     }
   },

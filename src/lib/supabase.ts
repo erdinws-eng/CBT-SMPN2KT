@@ -84,3 +84,18 @@ export const testSupabaseConnection = async (testUrl?: string, testKey?: string)
     return { success: false, message: err?.message || 'Gagal menyambung ke Supabase.' };
   }
 };
+
+export const broadcastRealtimeSync = (event: string, payload: any = {}) => {
+  const supabase = getSupabase();
+  if (!supabase) return;
+  try {
+    const channel = supabase.channel('realtime_exam_attempts_sync');
+    channel.send({
+      type: 'broadcast',
+      event,
+      payload,
+    });
+  } catch (e) {
+    // Ignore broadcast errors
+  }
+};

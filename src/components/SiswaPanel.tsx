@@ -143,6 +143,14 @@ export default function SiswaPanel({
         .filter((a) => a.studentId === currentUser.id && a.status === 'submitted')
         .map((a) => a.examId)
     );
+    // Tambahkan juga dari simpanan ujian selesai permanen
+    exams.forEach((ex) => {
+      try {
+        if (localStorage.getItem(`cbt_finished_${currentUser.id}_${ex.id}`)) {
+          submittedExamIds.add(ex.id);
+        }
+      } catch (e) {}
+    });
 
     // Bersihkan draf lokal jika ujian sudah diserahkan
     submittedExamIds.forEach((examId) => {
@@ -196,7 +204,18 @@ export default function SiswaPanel({
     if (hasResumedAttempt && violationWarningModal) {
       setViolationWarningModal(null);
     }
-  }, [attempts, currentUser.id, activeExam, violationWarningModal]);
+  }, [attempts, currentUser.id, activeExam, violationWarningModal, exams]);
+
+  // Auto-polling periksa izin guru setiap 1.5 detik saat modal pelanggaran aktif agar langsung unlock saat guru klik Lanjutkan
+  useEffect(() => {
+    if (!violationWarningModal) return;
+    const interval = setInterval(() => {
+      if (onRefreshData) {
+        onRefreshData();
+      }
+    }, 1500);
+    return () => clearInterval(interval);
+  }, [violationWarningModal, onRefreshData]);
 
   // Fungsi periksa izin guru secara manual (misal siswa klik tombol Cek Izin)
   const handleCheckTeacherPermission = async (targetExam?: Exam) => {
@@ -442,16 +461,14 @@ export default function SiswaPanel({
 
       if (playBeep) playViolationBeep();
 
-      // Seketika catat pelanggaran dan tampilkan jendela modal pelanggaran
+      // Seketika catat pelanggaran dan tampilkan jendela modal peringatan
       setViolationCount(1);
       setViolationWarningModal(
         `UJIAN DIHENTIKAN OTOMATIS KARENA PELANGGARAN!\n\nTerdeteksi: ${reason}.\nSeluruh lembar jawaban Anda otomatis tersimpan dan telah dikirim ke database pengawas.\n\nSilakan segera lapor ke Pengawas/Guru di ruangan untuk meminta tombol "Lanjutkan Ujian" agar Anda dapat membuka kembali dan melanjutkan pengerjaan dengan jawaban yang telah tersimpan di database.`
       );
 
-      // Muncul jendela modal pelanggaran dan bunyi bip selama 1 - 1,5 detik, baru kemudian tampilan berpindah ke panel siswa
-      setTimeout(() => {
-        handleFinishExam(true);
-      }, 1500);
+      // LANGSUNG kirim status pelanggaran ke database pengawas seketika (< 50ms) tanpa menunggu jeda
+      handleFinishExam(true, reason);
     };
 
     const handleVisibilityChange = () => {
@@ -581,13 +598,15 @@ export default function SiswaPanel({
     await handleFinishExam(false);
   };
 
-  // Calculate Score, Save to Supabase & localStorage with 1-2s delay, and Finalize
-  const handleFinishExam = async (isDisqualified = false) => {
+  // Calculate Score, Save to Supabase & localStorage without artificial delays, and Finalize
+  const handleFinishExam = async (isDisqualified = false, violationReason = '') => {
     if (!activeExam || !currentAttempt) return;
 
     // Pastikan flag submitting aktif agar saat exitFullscreen dipanggil, tidak terpicu event pelanggaran
     isSubmittingRef.current = true;
-    setIsSavingExam(true);
+    if (!isDisqualified) {
+      setIsSavingExam(true);
+    }
 
     // Langsung bebaskan wakeLock dan izinkan transisi fullscreen ponsel secara aman
     try {
@@ -602,7 +621,7 @@ export default function SiswaPanel({
     }
 
     let earnedPoints = 0;
-    const totalMaxPoints = activeExam.questions.reduce((acc, q) => acc + q.points, 0) || 100;
+    const totalMaxPoints = activeExam.questions.reduce((acc, q) => acc + (q.points || 0), 0) || 100;
 
     // Automatic grading for supported question types
     activeExam.questions.forEach((q) => {
@@ -679,6 +698,16 @@ export default function SiswaPanel({
 
     const scorePercentage = Math.min(100, Math.round((earnedPoints / totalMaxPoints) * 100));
 
+    const calculatedViolationLogs = isDisqualified
+      ? [
+          ...(currentAttempt?.violationLogs || []),
+          {
+            timestamp: new Date().toISOString(),
+            reason: violationReason || 'Pelanggaran terdeteksi oleh sistem pengawas CBT',
+          },
+        ]
+      : (currentAttempt?.violationLogs || []);
+
     const finalAttempt: ExamAttempt = {
       ...currentAttempt,
       id: currentAttempt?.id || 'att_' + Date.now(),
@@ -688,17 +717,21 @@ export default function SiswaPanel({
       studentId: currentUser.id,
       studentName: currentUser.name,
       studentNisn: currentUser.nip_nisn || '',
-      studentClass: studentClass,
+      studentClass: studentClass || currentUser.classGrade || '',
       status: isDisqualified ? 'violation_disqualified' : 'submitted',
-      answers: userAnswers,
+      answers: userAnswers || {},
+      doubtfulAnswers: doubtQuestions || {},
+      scores: {},
+      startedAt: currentAttempt?.startedAt || new Date().toISOString(),
       submittedAt: new Date().toISOString(),
-      scorePercentage,
-      totalScore: earnedPoints,
-      maxPossibleScore: totalMaxPoints,
-      totalEarnedPoints: earnedPoints,
-      totalMaxPoints,
+      scorePercentage: Number.isFinite(scorePercentage) ? scorePercentage : 0,
+      totalScore: Number.isFinite(earnedPoints) ? earnedPoints : 0,
+      maxPossibleScore: Number.isFinite(totalMaxPoints) ? totalMaxPoints : 100,
+      totalEarnedPoints: Number.isFinite(earnedPoints) ? earnedPoints : 0,
+      totalMaxPoints: Number.isFinite(totalMaxPoints) ? totalMaxPoints : 100,
       passedKkm: scorePercentage >= activeExam.kkm,
       violationCount: isDisqualified ? Math.max(1, violationCount) : violationCount,
+      violationLogs: calculatedViolationLogs,
       isGraded: true,
     };
 
@@ -713,46 +746,47 @@ export default function SiswaPanel({
     );
     const updatedAttempts = [...filteredAttempts, finalAttempt];
 
-    // 1. Simpan segera ke localStorage riwayat attempts
+    // 1. Simpan segera ke localStorage riwayat attempts dan perbarui state React App seketika tanpa jeda
     saveAttempts(updatedAttempts);
+    onUpdateAttempts(updatedAttempts);
 
-    // 2. Simpan langsung ke Supabase database jika terkonfigurasi (dikirim saat pelanggaran ATAU saat siswa selesai)
-    try {
-      await supabaseService.saveExamAttempt(finalAttempt);
-      // Bersihkan attempt in_progress lama dari Supabase jika ada ID berbeda
-      const staleInProgress = attempts.filter(
-        (a) =>
-          a.examId === activeExam.id &&
-          a.studentId === currentUser.id &&
-          a.status === 'in_progress' &&
-          a.id !== finalAttempt.id
-      );
-      for (const stale of staleInProgress) {
-        await supabaseService.deleteExamAttempt(stale.id);
-      }
-    } catch (err) {
-      console.warn('Gagal menyimpan attempt ke Supabase:', err);
-    }
-
-    // 3. Jika terjadi pelanggaran, pertahankan draf jawaban lokal agar siap dilanjutkan saat guru klik Lanjutkan
-    if (isDisqualified) {
+    // 2. Simpan permanen ke storage lokal bahwa siswa sudah menyelesaikan ujian ini agar kartu ujian tidak pernah revert
+    if (!isDisqualified) {
+      try {
+        localStorage.setItem(
+          `cbt_finished_${currentUser.id}_${activeExam.id}`,
+          JSON.stringify(finalAttempt)
+        );
+        localStorage.removeItem(getProgressStorageKey(currentUser.id, activeExam.id));
+      } catch (e) {}
+    } else {
       saveActiveProgressToLocal({
         answers: userAnswers,
         currentQuestionIndex,
         violationCount: Math.max(1, violationCount),
       });
-    } else {
-      // Jika siswa sudah selesai normal, bersihkan draf progres pengerjaan di localStorage
-      try {
-        localStorage.removeItem(getProgressStorageKey(currentUser.id, activeExam.id));
-      } catch (e) {}
     }
 
-    // 4. Jeda 1.6 detik (1-2 detik) agar proses transmisi jawaban selesai dengan aman
-    await new Promise((resolve) => setTimeout(resolve, 1600));
+    // 2b. Simpan ke antrean sinkronisasi pending SECARA SINKRON SEBELUM MENCOBA JARINGAN!
+    // Ini menjamin 100%: jika browser di-refresh, ditutup, atau wifi lambat seketika saat submit/pelanggaran,
+    // data attempt SUDAH TERSIMPAN di storage lokal dan otomatis di-flush ke Supabase saat reload atau online!
+    try {
+      localStorage.setItem(
+        `cbt_pending_attempt_${finalAttempt.id}`,
+        JSON.stringify(finalAttempt)
+      );
+    } catch (e) {}
 
-    // 5. Update state React App (hanya saat ujian selesai)
-    onUpdateAttempts(updatedAttempts);
+    // 3. Tampilkan hasil ujian seketika di browser siswa (Zero-Lag UI, tidak menunggu antrian jaringan)
+    setActiveExam(null);
+    setCurrentAttempt(finalAttempt);
+    setIsSubmitConfirmOpen(false);
+    setIsSubmittingExam(false);
+
+    // Tutup modal indikator penyimpanan setelah jeda visual halus (150ms)
+    setTimeout(() => {
+      setIsSavingExam(false);
+    }, 150);
 
     // Trigger confetti on good completion
     if (!isDisqualified && scorePercentage >= activeExam.kkm) {
@@ -763,16 +797,61 @@ export default function SiswaPanel({
       });
     }
 
-    setActiveExam(null);
-    setCurrentAttempt(finalAttempt);
-    setIsSubmitConfirmOpen(false);
-    setIsSubmittingExam(false);
-    setIsSavingExam(false);
-
-    // Berikan jeda toleransi 2.5 detik untuk perangkat ponsel agar event blur/fullscreenchange lambat tidak memicu false-violation
+    // Berikan jeda toleransi untuk perangkat ponsel agar event blur/fullscreenchange lambat tidak memicu false-violation
     setTimeout(() => {
       isSubmittingRef.current = false;
     }, 2500);
+
+    // 4. Sinkronisasi ke Supabase database dijalankan di latar belakang (Background Sync dengan Auto-Retry & Jitter)
+    // Hal ini menjamin 100-300 browser siswa dapat submit bersamaan tanpa overload atau saling mengunci
+    (async () => {
+      try {
+        // Berikan sedikit random jitter (0 - 1000ms) untuk mendistribusikan 100-300 koneksi bersamaan
+        const jitter = Math.floor(Math.random() * 1000);
+        await new Promise((res) => setTimeout(res, jitter));
+
+        let success = await supabaseService.saveExamAttempt(finalAttempt);
+        if (!success) {
+          console.warn('Percobaan pertama simpan attempt tertunda, mencoba ulang di latar belakang...');
+          await new Promise((res) => setTimeout(res, 1200));
+          success = await supabaseService.saveExamAttempt(finalAttempt);
+        }
+
+        // Jika jaringan sedang gangguan/offline, simpan ke antrian offline lokal untuk auto-sync saat online
+        if (!success) {
+          try {
+            localStorage.setItem(
+              `cbt_pending_attempt_${finalAttempt.id}`,
+              JSON.stringify(finalAttempt)
+            );
+          } catch (e) {}
+        } else {
+          try {
+            localStorage.removeItem(`cbt_pending_attempt_${finalAttempt.id}`);
+          } catch (e) {}
+        }
+
+        // Bersihkan attempt in_progress lama dari Supabase jika ada ID berbeda
+        const staleInProgress = attempts.filter(
+          (a) =>
+            a.examId === activeExam.id &&
+            a.studentId === currentUser.id &&
+            a.status === 'in_progress' &&
+            a.id !== finalAttempt.id
+        );
+        for (const stale of staleInProgress) {
+          await supabaseService.deleteExamAttempt(stale.id);
+        }
+      } catch (err) {
+        console.warn('Latar belakang: Gagal menyimpan attempt ke Supabase:', err);
+        try {
+          localStorage.setItem(
+            `cbt_pending_attempt_${finalAttempt.id}`,
+            JSON.stringify(finalAttempt)
+          );
+        } catch (e) {}
+      }
+    })();
   };
 
   // Helper time format
@@ -791,9 +870,35 @@ export default function SiswaPanel({
 
   // If student is NOT in exam room: Show Student Dashboard
   if (!activeExam) {
-    const riwayatAttempts = attempts.filter(
-      (a) => a.studentId === currentUser.id && a.status !== 'in_progress'
-    ).sort((a, b) => new Date(b.startedAt).getTime() - new Date(a.startedAt).getTime());
+    const finishedStorageAttempts: ExamAttempt[] = [];
+    exams.forEach((ex) => {
+      try {
+        const finishedRaw = localStorage.getItem(`cbt_finished_${currentUser.id}_${ex.id}`);
+        if (finishedRaw) {
+          const parsed: ExamAttempt = JSON.parse(finishedRaw);
+          finishedStorageAttempts.push(parsed);
+        }
+      } catch (e) {}
+    });
+
+    // Peta attempt siswa dengan jaminan: simpanan ujian selesai permanen (cbt_finished_) selalu masuk ke riwayat
+    const attemptMap = new Map<string, ExamAttempt>();
+    attempts.forEach((a) => {
+      if (a.studentId === currentUser.id) {
+        attemptMap.set(a.id, a);
+      }
+    });
+
+    finishedStorageAttempts.forEach((f) => {
+      const existing = attemptMap.get(f.id);
+      if (!existing || existing.status !== 'submitted') {
+        attemptMap.set(f.id, f);
+      }
+    });
+
+    const riwayatAttempts = Array.from(attemptMap.values())
+      .filter((a) => a.status !== 'in_progress')
+      .sort((a, b) => new Date(b.submittedAt || b.startedAt).getTime() - new Date(a.submittedAt || a.startedAt).getTime());
 
     return (
       <div id="siswa-panel-layout" className="flex h-[calc(100vh-64px)] overflow-hidden bg-slate-50">
@@ -900,8 +1005,23 @@ export default function SiswaPanel({
                         (a) => a.examId === exam.id && a.studentId === currentUser.id
                       );
 
-                      // Cari attempt yang sudah diserahkan (submitted)
-                      const submittedAttempts = studentExamAttempts.filter((a) => a.status === 'submitted');
+                      // Cari attempt yang sudah diserahkan (submitted) dari props attempts DAN storage lokal permanen
+                      const submittedFromStorage: ExamAttempt[] = [];
+                      try {
+                        const finishedRaw = localStorage.getItem(`cbt_finished_${currentUser.id}_${exam.id}`);
+                        if (finishedRaw) {
+                          const parsedFinished: ExamAttempt = JSON.parse(finishedRaw);
+                          submittedFromStorage.push(parsedFinished);
+                        }
+                      } catch (e) {}
+
+                      const submittedAttempts = [
+                        ...studentExamAttempts.filter((a) => a.status === 'submitted'),
+                        ...submittedFromStorage.filter(
+                          (sf) => !studentExamAttempts.some((sa) => sa.id === sf.id && sa.status === 'submitted')
+                        ),
+                      ];
+
                       const latestSubmitted = [...submittedAttempts].sort(
                         (a, b) => new Date(b.submittedAt || b.startedAt).getTime() - new Date(a.submittedAt || a.startedAt).getTime()
                       )[0];
@@ -920,9 +1040,9 @@ export default function SiswaPanel({
                         return new Date(a.startedAt).getTime() > new Date(latestSubmitted.submittedAt || latestSubmitted.startedAt).getTime();
                       });
 
-                      const hasLocalProgress = Boolean(localStorage.getItem(getProgressStorageKey(currentUser.id, exam.id)));
+                      const hasLocalProgress = !latestSubmitted && Boolean(localStorage.getItem(getProgressStorageKey(currentUser.id, exam.id)));
 
-                      // Jika siswa sudah submit: UJIAN SELESAI!
+                      // Jika siswa sudah submit: UJIAN SELESAI MUTLAK!
                       const isFinished = Boolean(latestSubmitted);
                       const isDisqualified = !isFinished && Boolean(latestDisqualified);
                       const isResumedByTeacher = !isFinished && !isDisqualified && Boolean(inProgressAttempt);
