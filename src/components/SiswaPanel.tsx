@@ -629,7 +629,11 @@ export default function SiswaPanel({
       if (!studentAns) return;
 
       if (q.type === 'pilihan_ganda') {
-        if (studentAns === q.correctAnswer) {
+        const sAns = String(studentAns).trim();
+        const cAns = String(q.correctAnswer || '').trim();
+        const sLetter = sAns.match(/^[A-Ea-e]/)?.[0]?.toUpperCase();
+        const cLetter = cAns.match(/^[A-Ea-e]/)?.[0]?.toUpperCase();
+        if (sAns === cAns || (sLetter && cLetter && sLetter === cLetter) || (cAns && (sAns.startsWith(cAns) || cAns.startsWith(sAns)))) {
           earnedPoints += q.points;
         }
       } else if (q.type === 'pilihan_ganda_kompleks') {

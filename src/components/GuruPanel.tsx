@@ -366,7 +366,13 @@ export default function GuruPanel({
   const calculateQuestionScore = (q: Question, studentAns: any): number => {
     if (studentAns === undefined || studentAns === null || studentAns === '') return 0;
     if (q.type === 'pilihan_ganda') {
-      if (String(studentAns).trim() === String(q.correctAnswer).trim()) return q.points;
+      const sAns = String(studentAns).trim();
+      const cAns = String(q.correctAnswer || '').trim();
+      if (sAns === cAns) return q.points;
+      const sLetter = sAns.match(/^[A-Ea-e]/)?.[0]?.toUpperCase();
+      const cLetter = cAns.match(/^[A-Ea-e]/)?.[0]?.toUpperCase();
+      if (sLetter && cLetter && sLetter === cLetter) return q.points;
+      if (cAns && (sAns.startsWith(cAns) || cAns.startsWith(sAns))) return q.points;
     } else if (q.type === 'pilihan_ganda_kompleks') {
       if (Array.isArray(studentAns) && Array.isArray(q.correctAnswers)) {
         const matched = studentAns.filter((a) => q.correctAnswers?.includes(a)).length;

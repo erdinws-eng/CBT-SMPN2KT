@@ -373,23 +373,39 @@ export async function downloadTemplateSoalWord() {
           new Paragraph({
             children: [
               new TextRun({
-                text: '• Awali setiap nomor butir soal dengan angka dan tanda titik, contoh: "1. Pertanyaan...", "2. Pertanyaan..."\n',
+                text: '• Awali setiap nomor butir soal dengan angka dan titik, contoh: "1. Pertanyaan...", "2. Pertanyaan..."\n',
                 size: 20,
               }),
               new TextRun({
-                text: '• Untuk Pilihan Ganda: tuliskan pilihan jawaban diawali huruf kapital dan titik: "A. Pilihan...", "B. Pilihan...", "C. ...", "D. ...", "E. ..."\n',
+                text: '• Pilihan Ganda (PG): Tuliskan opsi diawali huruf dan titik: "A. Opsi...", "B. Opsi...", "C. ...", "D. ...". Kunci: "Kunci: A" (atau "Kunci: B").\n',
                 size: 20,
               }),
               new TextRun({
-                text: '• Kunci jawaban ditulis di baris baru di bawah pilihan dengan format: "Kunci: A" (atau "Kunci: B", dsb).\n',
+                text: '• Pilihan Ganda Kompleks (PGK): Awali soal dengan [Pilihan Ganda Kompleks], kunci lebih dari satu, contoh: "Kunci: A, C".\n',
                 size: 20,
               }),
               new TextRun({
-                text: '• Untuk Soal Esai / Uraian: tulis pertanyaan soal, lalu di baris berikutnya tulis "Kunci: [pembahasan / kata kunci jawaban]".\n',
+                text: '• Benar-Salah: Awali soal dengan [Benar-Salah], kunci format: "Kunci: Benar" atau "Kunci: Salah".\n',
                 size: 20,
               }),
               new TextRun({
-                text: '• Simpan file dalam format .docx lalu unggah melalui tombol "Impor Word" di menu Bank Soal CBT.',
+                text: '• Menjodohkan: Awali soal dengan [Menjodohkan], lalu tuliskan pasangan dengan tanda sama dengan (=), contoh: "Indonesia = Jakarta".\n',
+                size: 20,
+              }),
+              new TextRun({
+                text: '• Isian Singkat: Awali soal dengan [Isian], kunci berupa jawaban kata/frasa singkat, contoh: "Kunci: Nusantara".\n',
+                size: 20,
+              }),
+              new TextRun({
+                text: '• Uraian / Esai: Awali soal dengan [Uraian] atau [Essay], kunci berupa pembahasan / rubrik jawaban.\n',
+                size: 20,
+              }),
+              new TextRun({
+                text: '• Bobot nilai dan pembahasan dapat ditambahkan opsional: "Bobot: 10", "Pembahasan: ...".\n',
+                size: 20,
+              }),
+              new TextRun({
+                text: '• Anda juga dapat menggunakan tabel Word (No | Bentuk Soal | Soal | Opsi A | Opsi B | Opsi C | Opsi D | Kunci | Bobot).',
                 size: 20,
                 italics: true,
               }),
@@ -402,11 +418,11 @@ export async function downloadTemplateSoalWord() {
             spacing: { after: 300 },
           }),
 
-          // Soal 1
+          // Soal 1: Pilihan Ganda
           new Paragraph({
             children: [
               new TextRun({
-                text: '1. Organel sel yang berfungsi sebagai tempat berlangsungnya respirasi seluler dan menghasilkan energi dalam bentuk ATP adalah...',
+                text: '1. [Pilihan Ganda] Organel sel yang berfungsi sebagai tempat berlangsungnya respirasi seluler dan menghasilkan energi dalam bentuk ATP adalah...',
                 bold: true,
                 size: 22,
               }),
@@ -426,28 +442,38 @@ export async function downloadTemplateSoalWord() {
                 size: 21,
               }),
             ],
-            spacing: { before: 80, after: 250 },
+            spacing: { before: 80, after: 100 },
           }),
-
-          // Soal 2
           new Paragraph({
             children: [
               new TextRun({
-                text: '2. Danau Toba terbentuk akibat letusan gunung berapi supervulkanik purba yang sangat dahsyat ribuan tahun lalu yang kemudian amblas dan terisi air. Danau dengan proses pembentukan seperti ini diklasifikasikan sebagai danau jenis...',
+                text: 'Pembahasan: Mitokondria sering disebut the powerhouse of cell karena menghasilkan energi seluler ATP.',
+                size: 20,
+                italics: true,
+              }),
+            ],
+            spacing: { after: 250 },
+          }),
+
+          // Soal 2: Pilihan Ganda Kompleks
+          new Paragraph({
+            children: [
+              new TextRun({
+                text: '2. [Pilihan Ganda Kompleks] Manakah dari pernyataan di bawah ini yang merupakan ciri-ciri makhluk hidup? (Pilihlah jawaban yang benar)',
                 bold: true,
                 size: 22,
               }),
             ],
             spacing: { before: 150, after: 100 },
           }),
-          new Paragraph({ children: [new TextRun({ text: 'A. Danau Tektonik murni', size: 21 })] }),
-          new Paragraph({ children: [new TextRun({ text: 'B. Danau Vulkanik kepundan', size: 21 })] }),
-          new Paragraph({ children: [new TextRun({ text: 'C. Danau Tekto-Vulkanik', size: 21 })] }),
-          new Paragraph({ children: [new TextRun({ text: 'D. Danau Karst (Dolina)', size: 21 })] }),
+          new Paragraph({ children: [new TextRun({ text: 'A. Memerlukan nutrisi/makanan', size: 21 })] }),
+          new Paragraph({ children: [new TextRun({ text: 'B. Mampu berkembang biak (reproduksi)', size: 21 })] }),
+          new Paragraph({ children: [new TextRun({ text: 'C. Tidak peka terhadap rangsang', size: 21 })] }),
+          new Paragraph({ children: [new TextRun({ text: 'D. Melakukan ekskresi (pengeluaran zat sisa)', size: 21 })] }),
           new Paragraph({
             children: [
               new TextRun({
-                text: 'Kunci: C',
+                text: 'Kunci: A, B, D',
                 bold: true,
                 color: '15803D',
                 size: 21,
@@ -456,38 +482,11 @@ export async function downloadTemplateSoalWord() {
             spacing: { before: 80, after: 250 },
           }),
 
-          // Soal 3
+          // Soal 3: Benar-Salah
           new Paragraph({
             children: [
               new TextRun({
-                text: '3. Perhatikan faktor-faktor berikut: suhu lingkungan, konsentrasi reaktan, penambahan katalis, dan luas permukaan bidang sentuh. Faktor yang dapat mempercepat terjadinya laju reaksi kimia adalah...',
-                bold: true,
-                size: 22,
-              }),
-            ],
-            spacing: { before: 150, after: 100 },
-          }),
-          new Paragraph({ children: [new TextRun({ text: 'A. Suhu dan luas permukaan bidang sentuh saja', size: 21 })] }),
-          new Paragraph({ children: [new TextRun({ text: 'B. Konsentrasi dan penambahan katalis saja', size: 21 })] }),
-          new Paragraph({ children: [new TextRun({ text: 'C. Semua faktor di atas dapat mempercepat laju reaksi', size: 21 })] }),
-          new Paragraph({ children: [new TextRun({ text: 'D. Hanya suhu yang berpengaruh terhadap energi aktivasi', size: 21 })] }),
-          new Paragraph({
-            children: [
-              new TextRun({
-                text: 'Kunci: C',
-                bold: true,
-                color: '15803D',
-                size: 21,
-              }),
-            ],
-            spacing: { before: 80, after: 250 },
-          }),
-
-          // Soal 4
-          new Paragraph({
-            children: [
-              new TextRun({
-                text: '4. Jelaskan perbedaan mendasar antara sel hewan dan sel tumbuhan beserta fungsi organel kloroplas dalam proses fotosintesis!',
+                text: '3. [Benar-Salah] Danau Toba merupakan danau tekto-vulkanik terbesar di Indonesia yang terbentuk dari letusan supervulkan purba.',
                 bold: true,
                 size: 22,
               }),
@@ -497,7 +496,7 @@ export async function downloadTemplateSoalWord() {
           new Paragraph({
             children: [
               new TextRun({
-                text: 'Kunci: Sel tumbuhan memiliki dinding sel yang kaku, plastida/kloroplas, dan vakuola berukuran besar. Sedangkan sel hewan tidak memiliki dinding sel dan plastida melainkan memiliki sentriol. Kloroplas berfungsi menangkap energi cahaya matahari untuk mengubah CO2 dan H2O menjadi glukosa dan oksigen.',
+                text: 'Kunci: Benar',
                 bold: true,
                 color: '15803D',
                 size: 21,
@@ -506,11 +505,37 @@ export async function downloadTemplateSoalWord() {
             spacing: { before: 80, after: 250 },
           }),
 
-          // Soal 5
+          // Soal 4: Menjodohkan
           new Paragraph({
             children: [
               new TextRun({
-                text: '5. Sebutkan dan berikan contoh konkret penerapan nilai kemanusiaan yang adil dan beradab (Sila ke-2 Pancasila) di lingkungan sekolah!',
+                text: '4. [Menjodohkan] Pasangkan organel sel berikut dengan fungsinya masing-masing secara tepat:',
+                bold: true,
+                size: 22,
+              }),
+            ],
+            spacing: { before: 150, after: 100 },
+          }),
+          new Paragraph({ children: [new TextRun({ text: 'Mitokondria = Respirasi seluler & pembentukan ATP', size: 21 })] }),
+          new Paragraph({ children: [new TextRun({ text: 'Ribosom = Tempat sintesis protein', size: 21 })] }),
+          new Paragraph({ children: [new TextRun({ text: 'Kloroplas = Fotosintesis pada tumbuhan', size: 21 })] }),
+          new Paragraph({ children: [new TextRun({ text: 'Nukleus = Pusat pengendali aktivitas genetik sel', size: 21 })] }),
+          new Paragraph({
+            children: [
+              new TextRun({
+                text: 'Bobot: 15',
+                bold: true,
+                size: 20,
+              }),
+            ],
+            spacing: { before: 80, after: 250 },
+          }),
+
+          // Soal 5: Isian Singkat
+          new Paragraph({
+            children: [
+              new TextRun({
+                text: '5. [Isian] Ibukota negara Republik Indonesia yang baru dan berlokasi di Kalimantan Timur bernama...',
                 bold: true,
                 size: 22,
               }),
@@ -520,13 +545,46 @@ export async function downloadTemplateSoalWord() {
           new Paragraph({
             children: [
               new TextRun({
-                text: 'Kunci: Menghargai hak asasi sesama teman tanpa membeda-bedakan suku, agama, dan latar belakang, tidak melakukan perundungan (bullying), serta bersikap saling tolong-menolong ketika ada warga sekolah yang tertimpa musibah.',
+                text: 'Kunci: Nusantara',
                 bold: true,
                 color: '15803D',
                 size: 21,
               }),
             ],
-            spacing: { before: 80, after: 200 },
+            spacing: { before: 80, after: 250 },
+          }),
+
+          // Soal 6: Uraian / Essay
+          new Paragraph({
+            children: [
+              new TextRun({
+                text: '6. [Uraian] Jelaskan perbedaan mendasar antara sel hewan dan sel tumbuhan beserta fungsi organel kloroplas dalam proses fotosintesis!',
+                bold: true,
+                size: 22,
+              }),
+            ],
+            spacing: { before: 150, after: 100 },
+          }),
+          new Paragraph({
+            children: [
+              new TextRun({
+                text: 'Kunci: Sel tumbuhan memiliki dinding sel yang kaku, plastida/kloroplas, dan vakuola berukuran besar. Sedangkan sel hewan tidak memiliki dinding sel dan plastida melainkan memiliki sentriol. Kloroplas berfungsi menangkap energi cahaya matahari untuk fotosintesis.',
+                bold: true,
+                color: '15803D',
+                size: 21,
+              }),
+            ],
+            spacing: { before: 80, after: 100 },
+          }),
+          new Paragraph({
+            children: [
+              new TextRun({
+                text: 'Bobot: 20',
+                bold: true,
+                size: 20,
+              }),
+            ],
+            spacing: { after: 200 },
           }),
         ],
       },
@@ -546,70 +604,655 @@ export async function downloadTemplateSoalWord() {
 
 // 7. DOKUMEN DOC / DOCX / TEXT PARSER UNTUK BANK SOAL
 export async function parseDocxTextQuestions(file: File): Promise<Question[]> {
-  let text = '';
+  let html = '';
+  let rawText = '';
+
   if (file.name.toLowerCase().endsWith('.docx') || file.type.includes('wordprocessingml')) {
     try {
       const buffer = await file.arrayBuffer();
-      const res = await mammoth.extractRawText({ arrayBuffer: buffer });
-      text = res?.value || '';
+      const htmlRes = await mammoth.convertToHtml({ arrayBuffer: buffer });
+      html = htmlRes?.value || '';
+      const rawRes = await mammoth.extractRawText({ arrayBuffer: buffer });
+      rawText = rawRes?.value || '';
     } catch (e) {
       console.warn('Gagal membaca struktur docx melalui mammoth, fallback ke text():', e);
-      text = await file.text();
+      rawText = await file.text();
     }
   } else {
-    text = await file.text();
+    rawText = await file.text();
   }
 
-  // Support standard Indonesian school question text format:
-  // "1. Pertanyaan... A. ... B. ... Kunci: A"
-  const lines = text.split('\n');
-  const questions: Question[] = [];
-  let currentPrompt = '';
-  let currentOptions: string[] = [];
-  let currentKey = '';
-  let currentPoints = 10;
-
-  const pushCurrent = () => {
-    if (currentPrompt.trim()) {
-      // Abaikan header judul petunjuk jika tidak ada opsi & kunci
-      const isHeader = currentOptions.length === 0 && !currentKey && (
-        currentPrompt.toUpperCase().includes('TEMPLATE') ||
-        currentPrompt.toUpperCase().includes('PETUNJUK') ||
-        currentPrompt.toUpperCase().includes('CONTOH BUTIR SOAL')
-      );
-      if (!isHeader) {
-        questions.push({
-          id: 'q_doc_' + Date.now() + '_' + questions.length,
-          type: currentOptions.length > 0 ? 'pilihan_ganda' : 'essay',
-          prompt: currentPrompt.trim(),
-          options: currentOptions.length > 0 ? currentOptions : undefined,
-          correctAnswer: currentKey || (currentOptions.length > 0 ? currentOptions[0] : undefined),
-          points: currentPoints,
-        });
-      }
+  // 1. Cek apakah ada tabel di file docx/HTML yang memuat butir soal
+  if (html && html.includes('<table')) {
+    const tableQuestions = parseHtmlTablesToQuestions(html);
+    if (tableQuestions.length > 0) {
+      return tableQuestions;
     }
-    currentPrompt = '';
-    currentOptions = [];
-    currentKey = '';
-  };
+  }
 
-  for (const line of lines) {
+  // 2. Normalisasi dokumen ke baris-baris terstruktur
+  const lines = html ? htmlToNormalizedLines(html) : rawTextToNormalizedLines(rawText);
+
+  // 3. Ekstrak butir soal
+  return parseNormalizedLinesToQuestions(lines);
+}
+
+// Normalisasi HTML ke array baris terstruktur
+function htmlToNormalizedLines(html: string): string[] {
+  let processed = html;
+
+  // Konversi <ol> dan <ul> ke item bernomor huruf A., B., C., D...
+  processed = processed.replace(/<ol[^>]*>([\s\S]*?)<\/ol>/gi, (_, inner) => {
+    let letterCode = 65;
+    return inner.replace(/<li[^>]*>([\s\S]*?)<\/li>/gi, (__: string, liText: string) => {
+      const clean = liText.replace(/<[^>]+>/g, '').trim();
+      if (/^[A-Ea-e][\.\)]\s*/.test(clean)) {
+        return `<p>${clean}</p>`;
+      }
+      const letter = String.fromCharCode(letterCode++);
+      return `<p>${letter}. ${clean}</p>`;
+    });
+  });
+
+  processed = processed.replace(/<ul[^>]*>([\s\S]*?)<\/ul>/gi, (_, inner) => {
+    let letterCode = 65;
+    return inner.replace(/<li[^>]*>([\s\S]*?)<\/li>/gi, (__: string, liText: string) => {
+      const clean = liText.replace(/<[^>]+>/g, '').trim();
+      if (/^[A-Ea-e][\.\)]\s*/.test(clean)) {
+        return `<p>${clean}</p>`;
+      }
+      const letter = String.fromCharCode(letterCode++);
+      return `<p>${letter}. ${clean}</p>`;
+    });
+  });
+
+  // Konversi tabel baris menjadi paragraf
+  processed = processed.replace(/<tr[^>]*>([\s\S]*?)<\/tr>/gi, (_, inner) => {
+    return inner.replace(/<td[^>]*>([\s\S]*?)<\/td>/gi, (__: string, tdText: string) => `<p>${tdText}</p>`);
+  });
+
+  processed = processed.replace(/<br\s*\/?>/gi, '\n');
+  processed = processed.replace(/<\/p>/gi, '\n');
+  processed = processed.replace(/<\/div>/gi, '\n');
+  processed = processed.replace(/<\/h[1-6]>/gi, '\n');
+  processed = processed.replace(/<[^>]+>/g, '');
+
+  return rawTextToNormalizedLines(processed);
+}
+
+// Normalisasi raw text ke array baris
+function rawTextToNormalizedLines(raw: string): string[] {
+  const rawLines = raw
+    .replace(/&nbsp;/g, ' ')
+    .replace(/\u00A0/g, ' ')
+    .replace(/\r\n/g, '\n')
+    .replace(/\r/g, '\n')
+    .split('\n');
+
+  const normalized: string[] = [];
+
+  for (const line of rawLines) {
     const trimmed = line.trim();
     if (!trimmed) continue;
 
-    // Check if new numbered question like "1. ", "2) "
-    if (/^\d+[\.\)]\s+/.test(trimmed)) {
-      pushCurrent();
-      currentPrompt = trimmed.replace(/^\d+[\.\)]\s+/, '');
-    } else if (/^[A-Ea-e][\.\)]\s+/.test(trimmed)) {
-      currentOptions.push(trimmed.toUpperCase().charAt(0) + '. ' + trimmed.replace(/^[A-Ea-e][\.\)]\s+/, ''));
-    } else if (/^(kunci|jawaban|kunci jawaban):/i.test(trimmed)) {
-      currentKey = trimmed.replace(/^(kunci|jawaban|kunci jawaban):\s*/i, '').trim();
+    // Cek jika nomor soal dan opsi berada dalam satu baris (misal: "1. Soal... A. Opsi 1 B. Opsi 2")
+    const qNumMatch = trimmed.match(/^(\d+[\.\)]\s+)([\s\S]+)/);
+    if (qNumMatch) {
+      const afterNum = qNumMatch[2];
+      const firstOptMatch = afterNum.search(/(?:^|\s+|[\t])(?=[A-Ea-e][\.\)]|\([A-Ea-e]\)|\[[A-Ea-e]\])/);
+      if (firstOptMatch !== -1 && firstOptMatch > 0) {
+        const promptPart = afterNum.substring(0, firstOptMatch).trim();
+        const optionsPart = afterNum.substring(firstOptMatch).trim();
+        normalized.push(qNumMatch[1] + promptPart);
+        const subOpts = splitHorizontalOptions(optionsPart);
+        normalized.push(...subOpts);
+        continue;
+      }
+    }
+
+    // Cek jika opsi ditulis mendatar (misal: "A. Pilihan 1   B. Pilihan 2   C. ...")
+    const optionMatches = trimmed.match(/(?:^|\s+|[\t])(?=[A-Ea-e][\.\)]|\([A-Ea-e]\)|\[[A-Ea-e]\])/g);
+    if (optionMatches && optionMatches.length >= 2) {
+      const subOpts = splitHorizontalOptions(trimmed);
+      normalized.push(...subOpts);
     } else {
-      currentPrompt += ' ' + trimmed;
+      normalized.push(trimmed);
     }
   }
-  pushCurrent();
+
+  return normalized;
+}
+
+// Pemecah opsi mendatar (A. ... B. ...)
+function splitHorizontalOptions(str: string): string[] {
+  return str
+    .split(/(?:^|\s+|[\t])(?=[A-Ea-e][\.\)]|\([A-Ea-e]\)|\[[A-Ea-e]\])/)
+    .map((s) => s.trim())
+    .filter(Boolean);
+}
+
+// Parser Tabel Word / HTML
+function parseHtmlTablesToQuestions(html: string): Question[] {
+  const tableRegex = /<table[^>]*>([\s\S]*?)<\/table>/gi;
+  const questions: Question[] = [];
+  let tMatch: RegExpExecArray | null;
+
+  while ((tMatch = tableRegex.exec(html)) !== null) {
+    const tableContent = tMatch[1];
+    const rowRegex = /<tr[^>]*>([\s\S]*?)<\/tr>/gi;
+    const rows: string[][] = [];
+    let rMatch: RegExpExecArray | null;
+
+    while ((rMatch = rowRegex.exec(tableContent)) !== null) {
+      const rowContent = rMatch[1];
+      const cellRegex = /<t[dh][^>]*>([\s\S]*?)<\/t[dh]>/gi;
+      const cells: string[] = [];
+      let cMatch: RegExpExecArray | null;
+
+      while ((cMatch = cellRegex.exec(rowContent)) !== null) {
+        const text = cMatch[1]
+          .replace(/<br\s*\/?>/gi, '\n')
+          .replace(/<[^>]+>/g, '')
+          .replace(/&nbsp;/g, ' ')
+          .replace(/\u00A0/g, ' ')
+          .trim();
+        cells.push(text);
+      }
+      if (cells.length > 0) rows.push(cells);
+    }
+
+    if (rows.length < 2) continue;
+
+    const headers = rows[0].map((h) => h.toLowerCase());
+    let colType = -1;
+    let colPrompt = -1;
+    let colA = -1;
+    let colB = -1;
+    let colC = -1;
+    let colD = -1;
+    let colE = -1;
+    let colOptions = -1;
+    let colKey = -1;
+    let colPoints = -1;
+    let colExplanation = -1;
+
+    headers.forEach((h, idx) => {
+      if (h.includes('bentuk') || h.includes('tipe') || h.includes('jenis')) colType = idx;
+      else if (h.includes('soal') || h.includes('pertanyaan') || h.includes('butir')) colPrompt = idx;
+      else if (h === 'a' || h === 'opsi a' || h === 'pilihan a') colA = idx;
+      else if (h === 'b' || h === 'opsi b' || h === 'pilihan b') colB = idx;
+      else if (h === 'c' || h === 'opsi c' || h === 'pilihan c') colC = idx;
+      else if (h === 'd' || h === 'opsi d' || h === 'pilihan d') colD = idx;
+      else if (h === 'e' || h === 'opsi e' || h === 'pilihan e') colE = idx;
+      else if (h.includes('pilihan') || h.includes('opsi')) colOptions = idx;
+      else if (h.includes('kunci') || h.includes('jawaban') || h.includes('answer')) colKey = idx;
+      else if (h.includes('bobot') || h.includes('poin') || h.includes('skor')) colPoints = idx;
+      else if (h.includes('pembahasan') || h.includes('penjelasan')) colExplanation = idx;
+    });
+
+    if (colPrompt !== -1 || (rows[0].length >= 2 && rows.length >= 2)) {
+      for (let r = 1; r < rows.length; r++) {
+        const row = rows[r];
+        if (row.length === 0 || row.every((c) => !c)) continue;
+
+        let prompt = colPrompt !== -1 ? row[colPrompt] || '' : row[1] || row[0] || '';
+        const rawType = colType !== -1 ? row[colType] || '' : '';
+        const key = colKey !== -1 ? row[colKey] || '' : row[row.length - 1] || '';
+        const points = colPoints !== -1 ? Number(row[colPoints]) || 10 : 10;
+        const explanation = colExplanation !== -1 ? row[colExplanation] || undefined : undefined;
+
+        const options: string[] = [];
+        if (colA !== -1 && row[colA]) options.push(`A. ${row[colA].replace(/^[A-Ea-e][\.\)]\s*/, '')}`);
+        if (colB !== -1 && row[colB]) options.push(`B. ${row[colB].replace(/^[A-Ea-e][\.\)]\s*/, '')}`);
+        if (colC !== -1 && row[colC]) options.push(`C. ${row[colC].replace(/^[A-Ea-e][\.\)]\s*/, '')}`);
+        if (colD !== -1 && row[colD]) options.push(`D. ${row[colD].replace(/^[A-Ea-e][\.\)]\s*/, '')}`);
+        if (colE !== -1 && row[colE]) options.push(`E. ${row[colE].replace(/^[A-Ea-e][\.\)]\s*/, '')}`);
+
+        if (options.length === 0 && colOptions !== -1 && row[colOptions]) {
+          const splitOpts = row[colOptions].split('\n').map((s) => s.trim()).filter(Boolean);
+          splitOpts.forEach((so, idx) => {
+            const letter = String.fromCharCode(65 + idx);
+            options.push(so.startsWith(letter + '.') ? so : `${letter}. ${so}`);
+          });
+        }
+
+        if (options.length === 0 && prompt.includes('\n')) {
+          const subLines = prompt.split('\n').map((l) => l.trim()).filter(Boolean);
+          const cleanPromptParts: string[] = [];
+          for (const sl of subLines) {
+            if (/^[A-Ea-e][\.\)]\s*/.test(sl)) {
+              const letter = sl.charAt(0).toUpperCase();
+              options.push(`${letter}. ${sl.replace(/^[A-Ea-e][\.\)]\s*/, '')}`);
+            } else {
+              cleanPromptParts.push(sl);
+            }
+          }
+          if (options.length > 0) {
+            prompt = cleanPromptParts.join(' ');
+          }
+        }
+
+        const q = buildQuestionModel({
+          id: 'q_tbl_' + Date.now() + '_' + questions.length,
+          prompt,
+          rawType,
+          options,
+          key,
+          points,
+          explanation,
+        });
+        if (q) questions.push(q);
+      }
+    }
+  }
 
   return questions;
 }
+
+// Parser baris-baris teks terstruktur ke soal CBT
+function parseNormalizedLinesToQuestions(lines: string[]): Question[] {
+  const questions: Question[] = [];
+  let currentPrompt = '';
+  let currentRawType = '';
+  let currentOptions: string[] = [];
+  let currentKey = '';
+  let currentPoints = 10;
+  let currentExplanation = '';
+  let candidateOptionLines: string[] = [];
+  let defaultSectionType = '';
+
+  const pushCurrent = () => {
+    if (currentPrompt.trim()) {
+      const isHeader =
+        currentOptions.length === 0 &&
+        !currentKey &&
+        (currentPrompt.toUpperCase().includes('TEMPLATE FORMAT SOAL') ||
+          currentPrompt.toUpperCase().includes('PETUNJUK PENULISAN') ||
+          currentPrompt.toUpperCase().includes('CONTOH BUTIR SOAL') ||
+          currentPrompt.toUpperCase().includes('KEMENTERIAN') ||
+          currentPrompt.toUpperCase().includes('DINAS PENDIDIKAN') ||
+          currentPrompt.toUpperCase().includes('PENILAIAN AKHIR') ||
+          currentPrompt.toUpperCase().includes('ASESMEN SUMATIF') ||
+          currentPrompt.toUpperCase().includes('ULANGAN HARIAN'));
+
+      if (!isHeader) {
+        // Jika opsi kosong tetapi ada baris-baris kandidat (misal Word me-render list tanpa huruf A-E)
+        // dan kunci adalah A, B, C, D, E atau tipe adalah pilihan ganda
+        if (
+          currentOptions.length === 0 &&
+          candidateOptionLines.length >= 2 &&
+          candidateOptionLines.length <= 5 &&
+          (/^[A-Ea-e][\.\)]?$/.test(currentKey.trim()) ||
+            /pilihan\s*ganda|pg/i.test(currentRawType || defaultSectionType))
+        ) {
+          candidateOptionLines.forEach((col, idx) => {
+            const letter = String.fromCharCode(65 + idx);
+            currentOptions.push(`${letter}. ${col}`);
+          });
+        }
+
+        const q = buildQuestionModel({
+          id: 'q_doc_' + Date.now() + '_' + questions.length,
+          prompt: currentPrompt.trim(),
+          rawType: currentRawType || defaultSectionType,
+          options: currentOptions,
+          key: currentKey,
+          points: currentPoints,
+          explanation: currentExplanation,
+        });
+        if (q) questions.push(q);
+      }
+    }
+
+    currentPrompt = '';
+    currentRawType = '';
+    currentOptions = [];
+    currentKey = '';
+    currentPoints = 10;
+    currentExplanation = '';
+    candidateOptionLines = [];
+  };
+
+  for (let i = 0; i < lines.length; i++) {
+    const trimmed = lines[i].trim();
+    if (!trimmed) continue;
+
+    // Header Bagian (misal: "BAGIAN I: SOAL PILIHAN GANDA", "BAGIAN II: URAIAN")
+    const sectionMatch = trimmed.match(
+      /^(?:bagian|bab|kategori|romawi)?\s*[I|V|X|A-E][\.\:]\s*(?:soal\s+)?(pilihan\s+ganda\s+kompleks|pilihan\s+ganda|pgk|pg|uraian|essay|esai|benar\s*[-–\s]*\s*salah|menjodohkan|isian)/i
+    );
+    if (sectionMatch) {
+      defaultSectionType = sectionMatch[1].toLowerCase();
+      continue;
+    }
+
+    // Tipe / Bentuk Soal eksplisit (misal: "Bentuk Soal: Pilihan Ganda", "Tipe Soal: PG", "Jenis Soal: Essay")
+    const explicitTypeMatch = trimmed.match(/^(?:bentuk|tipe|jenis)\s+(?:soal)?\s*[:=]\s*(.+)/i);
+    if (explicitTypeMatch) {
+      currentRawType = explicitTypeMatch[1].trim();
+      continue;
+    }
+
+    // Bobot / Poin (misal: "Bobot: 15", "Poin: 10", "Skor: 20")
+    const pointsMatch = trimmed.match(/^(?:bobot|poin|skor|nilai)\s*[:=]\s*(\d+)/i);
+    if (pointsMatch) {
+      currentPoints = Number(pointsMatch[1]) || 10;
+      continue;
+    }
+
+    // Pembahasan / Penjelasan
+    const explMatch = trimmed.match(/^(?:pembahasan|penjelasan|rubrik|rubrik penilaian|keterangan)\s*[:=]\s*(.*)/i);
+    if (explMatch) {
+      currentExplanation = explMatch[1].trim();
+      continue;
+    }
+
+    // Kunci Jawaban (misal: "Kunci: B", "Kunci Jawaban: A, C", "Jawaban: Nusantara", "Kunci = Benar")
+    const keyMatch = trimmed.match(/^(?:kunci\s*jawaban|kunci|jawaban\s*benar|jawaban|answer|ans)\s*[:=]\s*(.*)/i);
+    if (keyMatch) {
+      currentKey = keyMatch[1].trim();
+      continue;
+    }
+
+    // Nomor Soal Baru (misal: "1. ", "2) ", "No. 1. ", "[1] ")
+    const numMatch = trimmed.match(/^(?:no\.?\s*)?(\d+)[\.\)]\s*(.*)/i);
+    if (numMatch) {
+      pushCurrent();
+      let textAfterNum = numMatch[2].trim();
+
+      // Cek apakah ada tag bentuk soal di awal pertanyaan seperti "[Pilihan Ganda]" atau "(PG)"
+      const tagTypeMatch = textAfterNum.match(/^(\[[^\]]+\]|\([^\)]+\))\s*(.*)/);
+      if (tagTypeMatch) {
+        const potentialTag = tagTypeMatch[1].replace(/[\[\]\(\)]/g, '').trim();
+        if (/pilihan\s*ganda|pg|uraian|essay|esai|benar|salah|jodoh|isian/i.test(potentialTag)) {
+          currentRawType = potentialTag;
+          textAfterNum = tagTypeMatch[2].trim();
+        }
+      }
+
+      currentPrompt = textAfterNum;
+      continue;
+    }
+
+    // Opsi Pilihan Jawaban (misal: "A. ...", "B) ...", "(A) ...", "[A] ...", "Opsi A: ...", "Pilihan A: ...")
+    const optMatch =
+      trimmed.match(/^(?:(?:pilihan|opsi|jawaban)\s+)?([A-Ea-e])[\.\)\:\-]\s*(.*)/i) ||
+      trimmed.match(/^[\(\[]([A-Ea-e])[\)\]]\s*(.*)/i);
+
+    if (optMatch) {
+      const letter = optMatch[1].toUpperCase();
+      const optText = optMatch[2].trim();
+      currentOptions.push(`${letter}. ${optText}`);
+      candidateOptionLines = [];
+      continue;
+    }
+
+    // Jika sedang dalam blok pertanyaan
+    if (currentPrompt) {
+      if (currentOptions.length === 0 && !currentKey && trimmed.length < 150 && !trimmed.endsWith(':')) {
+        candidateOptionLines.push(trimmed);
+      } else {
+        currentPrompt += ' ' + trimmed;
+      }
+    }
+  }
+
+  pushCurrent();
+  return questions;
+}
+
+// Konstruktor objek Soal lengkap
+function buildQuestionModel({
+  id,
+  prompt,
+  rawType,
+  options,
+  key,
+  points,
+  explanation,
+}: {
+  id: string;
+  prompt: string;
+  rawType: string;
+  options: string[];
+  key: string;
+  points: number;
+  explanation?: string;
+}): Question {
+  const finalType = detectQuestionType(rawType, options, key, prompt);
+  let finalOptions = options && options.length > 0 ? options : undefined;
+  let finalCorrectAnswer: string | undefined = undefined;
+  let finalCorrectAnswers: string[] | undefined = undefined;
+  let matchingPairs: { premise: string; match: string }[] | undefined = undefined;
+  let trueFalseStatements: { statement: string; answer: 'Benar' | 'Salah' }[] | undefined = undefined;
+  let fillInTheBlanks: string[] | undefined = undefined;
+
+  const cleanKey = (key || '').replace(/^[\(\[]/, '').replace(/[\)\]]$/, '').trim();
+
+  if (finalType === 'pilihan_ganda') {
+    // Jika opsi kosong atau kurang dari 2, cek apakah opsi tertulis di dalam prompt
+    if (!finalOptions || finalOptions.length < 2) {
+      const extracted = extractOptionsFromPromptText(prompt);
+      if (extracted.options.length >= 2) {
+        finalOptions = extracted.options;
+        prompt = extracted.prompt;
+      }
+    }
+
+    // Sesuaikan format jawaban benar dengan teks opsi jika ada
+    if (cleanKey && finalOptions && finalOptions.length > 0) {
+      const keyLetter = cleanKey.charAt(0).toUpperCase();
+      const matchedOpt = finalOptions.find(
+        (o) => o.toUpperCase().startsWith(keyLetter + '.') || o.toUpperCase().startsWith(keyLetter + ')')
+      );
+      finalCorrectAnswer = matchedOpt || (cleanKey.length === 1 ? `${keyLetter}.` : cleanKey);
+    } else {
+      finalCorrectAnswer = cleanKey || (finalOptions && finalOptions[0]) || 'A.';
+    }
+  } else if (finalType === 'pilihan_ganda_kompleks') {
+    if (!finalOptions || finalOptions.length < 2) {
+      const extracted = extractOptionsFromPromptText(prompt);
+      if (extracted.options.length >= 2) {
+        finalOptions = extracted.options;
+        prompt = extracted.prompt;
+      }
+    }
+
+    // Jawaban ganda lebih dari satu opsi, misal: "A, C" atau "A; C" atau "A dan C"
+    const letters = cleanKey
+      .split(/[,;&dan\s]+/)
+      .map((s) => s.trim().toUpperCase().charAt(0))
+      .filter((c) => /[A-E]/.test(c));
+
+    if (letters.length > 0 && finalOptions) {
+      finalCorrectAnswers = letters.map((l) => {
+        const found = finalOptions?.find((o) => o.toUpperCase().startsWith(l + '.'));
+        return found || l;
+      });
+      finalCorrectAnswer = finalCorrectAnswers[0];
+    } else {
+      finalCorrectAnswers = finalOptions ? [finalOptions[0]] : ['A'];
+      finalCorrectAnswer = finalCorrectAnswers[0];
+    }
+  } else if (finalType === 'benar_salah') {
+    const stmts = parseTrueFalseStatementsFromText(prompt);
+    if (stmts.length > 1) {
+      trueFalseStatements = stmts;
+      finalCorrectAnswer = stmts[0].answer;
+    } else {
+      const isSalah = /salah|false/i.test(cleanKey);
+      finalCorrectAnswer = isSalah ? 'Salah' : 'Benar';
+    }
+  } else if (finalType === 'menjodohkan') {
+    matchingPairs = parseMatchingPairsFromText(prompt, options);
+    if (!matchingPairs || matchingPairs.length === 0) {
+      matchingPairs = [
+        { premise: 'Domain 1', match: 'Kodomain 1' },
+        { premise: 'Domain 2', match: 'Kodomain 2' },
+      ];
+    }
+  } else if (finalType === 'isian') {
+    finalCorrectAnswer = cleanKey || 'Jawaban';
+  } else if (finalType === 'isi_kosong') {
+    fillInTheBlanks = cleanKey ? cleanKey.split(/[,;]+/).map((s) => s.trim()).filter(Boolean) : ['jawaban'];
+  } else if (finalType === 'essay') {
+    finalCorrectAnswer = cleanKey || undefined;
+  }
+
+  return {
+    id,
+    type: finalType,
+    prompt: prompt.trim(),
+    points: points || 10,
+    options: finalOptions,
+    correctAnswer: finalCorrectAnswer,
+    correctAnswers: finalCorrectAnswers,
+    matchingPairs,
+    trueFalseStatements,
+    fillInTheBlanks,
+    essayRubric: finalType === 'essay' ? cleanKey : undefined,
+    explanation: explanation || undefined,
+  };
+}
+
+// Deteksi cerdas tipe soal dari tag, opsi, kunci, dan teks soal
+function detectQuestionType(
+  rawType: string,
+  options: string[],
+  key: string,
+  prompt: string
+): QuestionType {
+  const norm = (rawType || '').toLowerCase();
+  if (
+    norm.includes('kompleks') ||
+    norm.includes('pgk') ||
+    norm.includes('multiple answers') ||
+    norm.includes('lebih dari satu')
+  ) {
+    return 'pilihan_ganda_kompleks';
+  }
+  if (
+    norm.includes('pilihan ganda') ||
+    norm.includes('pg') ||
+    norm.includes('pilihan tunggal') ||
+    norm.includes('multiple choice')
+  ) {
+    return 'pilihan_ganda';
+  }
+  if (
+    norm.includes('benar') ||
+    norm.includes('salah') ||
+    norm.includes('b-s') ||
+    norm.includes('b/s') ||
+    norm.includes('true/false')
+  ) {
+    return 'benar_salah';
+  }
+  if (norm.includes('jodoh') || norm.includes('matching') || norm.includes('pasang')) {
+    return 'menjodohkan';
+  }
+  if (norm.includes('isi kosong') || norm.includes('fill in') || norm.includes('melengkapi')) {
+    return 'isi_kosong';
+  }
+  if (norm.includes('susun') || norm.includes('jumble')) {
+    return 'susun_kata';
+  }
+  if (norm.includes('isian') || norm.includes('singkat') || norm.includes('short answer')) {
+    return 'isian';
+  }
+  if (norm.includes('essay') || norm.includes('uraian') || norm.includes('esai')) {
+    return 'essay';
+  }
+
+  const trimmedKey = (key || '').trim();
+
+  // Kunci berupa beberapa huruf (misal: "A, C" atau "A; C" atau "A dan C")
+  if (/^[A-Ea-e]\s*[,;&dan]\s*[A-Ea-e]/i.test(trimmedKey)) {
+    return 'pilihan_ganda_kompleks';
+  }
+
+  // Kunci berupa huruf tunggal A-E (misal: "A", "B", "C", "D", "E")
+  if (/^[A-Ea-e][\.\)]?$/i.test(trimmedKey)) {
+    return 'pilihan_ganda';
+  }
+
+  // Jika memiliki minimal 2 opsi jawaban
+  if (options && options.length >= 2) {
+    return 'pilihan_ganda';
+  }
+
+  // Kunci bernilai Benar atau Salah
+  if (/^(benar|salah|true|false)$/i.test(trimmedKey)) {
+    return 'benar_salah';
+  }
+
+  // Pasangan menjodohkan pada teks (berisi tanda = atau ->)
+  if (prompt.includes('=') && prompt.split('\n').filter((l) => l.includes('=')).length >= 2) {
+    return 'menjodohkan';
+  }
+
+  // Isian rumpang / kosong
+  if (prompt.includes('[blank]') || prompt.includes('_____')) {
+    return 'isi_kosong';
+  }
+
+  // Jika kunci adalah kata/frasa pendek (< 30 karakter) dan pertanyaan berupa pertanyaan spesifik
+  if (trimmedKey && trimmedKey.length > 0 && trimmedKey.length <= 30 && !trimmedKey.includes('\n')) {
+    if (/^(siapakah|apakah|sebutkan satu|berapakah|di mana|kapan)\b/i.test(prompt) || prompt.includes('...')) {
+      return 'isian';
+    }
+  }
+
+  // Default jika tanpa opsi dan jawaban berupa penjelasan panjang
+  return 'essay';
+}
+
+// Ekstrak opsi jika tertulis di baris pertanyaan
+function extractOptionsFromPromptText(prompt: string): { prompt: string; options: string[] } {
+  const match = prompt.search(/(?:^|\s+)(?=[A-Ea-e][\.\)]|\([A-Ea-e]\))/);
+  if (match !== -1 && match > 0) {
+    const cleanPrompt = prompt.substring(0, match).trim();
+    const optsPart = prompt.substring(match).trim();
+    const opts = splitHorizontalOptions(optsPart);
+    if (opts.length >= 2) {
+      return { prompt: cleanPrompt, options: opts };
+    }
+  }
+  return { prompt, options: [] };
+}
+
+// Ekstrak pasangan menjodohkan
+function parseMatchingPairsFromText(
+  prompt: string,
+  options?: string[]
+): { premise: string; match: string }[] {
+  const pairs: { premise: string; match: string }[] = [];
+  const lines = (prompt + '\n' + (options || []).join('\n')).split('\n');
+  for (const line of lines) {
+    const match = line.match(/^(.+?)\s*(?:=|->|—|~)\s*(.+)$/);
+    if (match) {
+      const p = match[1].replace(/^\d+[\.\)]\s*/, '').trim();
+      const m = match[2].trim();
+      if (p && m) pairs.push({ premise: p, match: m });
+    }
+  }
+  return pairs;
+}
+
+// Ekstrak pernyataan benar/salah
+function parseTrueFalseStatementsFromText(
+  prompt: string
+): { statement: string; answer: 'Benar' | 'Salah' }[] {
+  const stmts: { statement: string; answer: 'Benar' | 'Salah' }[] = [];
+  const lines = prompt.split('\n');
+  for (const line of lines) {
+    const match = line.match(/^(.+?)[\s\:\-\–\(\[]+(benar|salah|true|false)[\)\]]?$/i);
+    if (match) {
+      const s = match[1].replace(/^[-•\d+\.\)]\s*/, '').trim();
+      const ans: 'Benar' | 'Salah' = /salah|false/i.test(match[2]) ? 'Salah' : 'Benar';
+      if (s) stmts.push({ statement: s, answer: ans });
+    }
+  }
+  return stmts;
+}
+
