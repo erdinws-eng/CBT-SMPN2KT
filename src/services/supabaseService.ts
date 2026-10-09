@@ -1,8 +1,9 @@
 import { getSupabase } from '../lib/supabase';
 import { SchoolSettings, User, Subject, Exam, ExamAttempt } from '../types';
+import { getStoredSettings } from '../lib/storage';
 
 export const supabaseService = {
-  // 1. Ambil data sekolah
+  // 1. Ambil data sekolah & konfigurasi aplikasi CBT
   async getSchoolSettings(): Promise<SchoolSettings | null> {
     const supabase = getSupabase();
     if (!supabase) return null;
@@ -11,22 +12,53 @@ export const supabaseService = {
       const { data, error } = await supabase
         .from('school_settings')
         .select('*')
-        .eq('id', 'default_school')
-        .single();
+        .in('id', ['default_school', 'app_config']);
 
-      if (error || !data) return null;
+      if (error || !data || data.length === 0) return null;
+
+      const schoolRow = data.find((r) => r.id === 'default_school') || data[0];
+      const appRow = data.find((r) => r.id === 'app_config');
+
+      let parsedConfig: Partial<SchoolSettings> = {};
+      if (appRow && appRow.school_address) {
+        try {
+          parsedConfig = JSON.parse(appRow.school_address);
+        } catch {}
+      }
+
+      const local = getStoredSettings();
 
       return {
-        appName: data.app_name || 'SMART CBT PRO',
-        schoolName: data.school_name,
-        schoolNpsn: data.school_npsn || '',
-        schoolAddress: data.school_address || '',
-        schoolCity: data.school_city || '',
-        academicYear: data.academic_year || '',
-        semester: data.semester || 'Genap',
-        principalName: data.principal_name || '',
-        principalNip: data.principal_nip || '',
-        logoUrl: data.logo_url || '',
+        appName:
+          parsedConfig.appName ||
+          (appRow ? appRow.school_name : undefined) ||
+          (schoolRow as any).app_name ||
+          local.appName ||
+          'SMART CBT PRO',
+        schoolName: schoolRow.school_name || local.schoolName,
+        schoolNpsn: schoolRow.school_npsn ?? local.schoolNpsn ?? '',
+        schoolAddress: schoolRow.school_address ?? local.schoolAddress ?? '',
+        schoolCity: schoolRow.school_city ?? local.schoolCity ?? '',
+        academicYear: schoolRow.academic_year ?? local.academicYear ?? '',
+        semester: (schoolRow.semester as 'Ganjil' | 'Genap') ?? local.semester ?? 'Genap',
+        principalName: schoolRow.principal_name ?? local.principalName ?? '',
+        principalNip: schoolRow.principal_nip ?? local.principalNip ?? '',
+        logoUrl: schoolRow.logo_url || local.logoUrl || '',
+        dinasName:
+          parsedConfig.dinasName ||
+          (schoolRow as any).dinas_name ||
+          local.dinasName ||
+          'DINAS PENDIDIKAN DAN KEBUDAYAAN',
+        kabupatenName:
+          parsedConfig.kabupatenName ||
+          (schoolRow as any).kabupaten_name ||
+          local.kabupatenName ||
+          'PEMERINTAH KABUPATEN KOTABARU',
+        signatureLocation:
+          parsedConfig.signatureLocation ||
+          (schoolRow as any).signature_location ||
+          local.signatureLocation ||
+          'Kotabaru',
       };
     } catch (err) {
       console.warn('Error fetching school settings from Supabase:', err);
@@ -39,9 +71,11 @@ export const supabaseService = {
     if (!supabase) return false;
 
     try {
-      const { error } = await supabase.from('school_settings').upsert({
+      const now = new Date().toISOString();
+
+      // 1. Simpan detail profil sekolah resmi (default_school)
+      const schoolPayload: Record<string, any> = {
         id: 'default_school',
-        
         school_name: settings.schoolName,
         school_npsn: settings.schoolNpsn || '',
         school_address: settings.schoolAddress || '',
@@ -51,9 +85,32 @@ export const supabaseService = {
         principal_name: settings.principalName || '',
         principal_nip: settings.principalNip || '',
         logo_url: settings.logoUrl || '',
-        updated_at: new Date().toISOString(),
-      });
-      return !error;
+        updated_at: now,
+      };
+
+      // 2. Simpan nama aplikasi & kop dinas di row 'app_config'
+      const appConfigPayload: Record<string, any> = {
+        id: 'app_config',
+        school_name: settings.appName || 'SMART CBT PRO',
+        school_address: JSON.stringify({
+          appName: settings.appName,
+          dinasName: settings.dinasName,
+          kabupatenName: settings.kabupatenName,
+          signatureLocation: settings.signatureLocation,
+        }),
+        updated_at: now,
+      };
+
+      const [resSchool, resApp] = await Promise.all([
+        supabase.from('school_settings').upsert(schoolPayload),
+        supabase.from('school_settings').upsert(appConfigPayload),
+      ]);
+
+      if (resSchool.error) {
+        console.error('Error saving school settings to Supabase:', resSchool.error);
+        return false;
+      }
+      return true;
     } catch (err) {
       console.error('Error saving school settings to Supabase:', err);
       return false;

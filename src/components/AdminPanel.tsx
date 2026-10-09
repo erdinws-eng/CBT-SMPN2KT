@@ -39,6 +39,7 @@ import {
 } from 'lucide-react';
 import { User, Subject, SchoolSettings } from '../types';
 import { getSupabaseConfig } from '../lib/supabase';
+import { saveStoredSettings } from '../lib/storage';
 import {
   exportSiswaToExcel,
   downloadTemplateSiswaExcel,
@@ -59,7 +60,7 @@ interface AdminPanelProps {
   onUpdateUsers: (users: User[]) => void;
   onUpdateCurrentUser?: (user: User) => void;
   onUpdateSubjects: (subjects: Subject[]) => void;
-  onUpdateSettings: (settings: SchoolSettings) => void;
+  onUpdateSettings: (settings: SchoolSettings) => void | Promise<void>;
   onOpenSupabaseModal?: () => void;
   onLogout?: () => void;
 }
@@ -259,7 +260,10 @@ export default function AdminPanel({
       setLogoPreview('');
       const updated = { ...localSettings, logoUrl: '' };
       setLocalSettings(updated);
-      onUpdateSettings(updated);
+      saveStoredSettings(updated);
+      if (onUpdateSettings) {
+        onUpdateSettings(updated);
+      }
       showToast('Logo resmi sekolah berhasil dihapus.', 'delete');
     }
     setDeleteConfirm({ isOpen: false, id: '', name: '', type: 'siswa' });
@@ -602,10 +606,20 @@ export default function AdminPanel({
   const handleSaveSettings = async (e: React.FormEvent) => {
     e.preventDefault();
     setIsSavingSettings(true);
-    await new Promise((r) => setTimeout(r, 650));
-    onUpdateSettings(localSettings);
-    setIsSavingSettings(false);
-    showToast('Profil sekolah dan pengaturan aplikasi berhasil disimpan!', 'success');
+    try {
+      // 1. Simpan langsung secara sinkron ke localStorage agar tidak hilang saat browser di-refresh
+      saveStoredSettings(localSettings);
+      
+      // 2. Kirim ke handler App untuk update state dan sinkronisasi ke database Supabase
+      if (onUpdateSettings) {
+        await onUpdateSettings(localSettings);
+      }
+      showToast('Profil sekolah dan pengaturan aplikasi berhasil disimpan!', 'success');
+    } catch (err: any) {
+      showToast('Gagal menyimpan profil: ' + (err?.message || 'Terjadi kesalahan sistem'), 'error');
+    } finally {
+      setIsSavingSettings(false);
+    }
   };
 
   const handleSaveAdminAccount = async (e: React.FormEvent) => {
@@ -698,12 +712,15 @@ export default function AdminPanel({
     }
 
     const reader = new FileReader();
-    reader.onload = (event) => {
+    reader.onload = async (event) => {
       const base64 = event.target?.result as string;
       setLogoPreview(base64);
       const updated = { ...localSettings, logoUrl: base64 };
       setLocalSettings(updated);
-      onUpdateSettings(updated);
+      saveStoredSettings(updated);
+      if (onUpdateSettings) {
+        await onUpdateSettings(updated);
+      }
       showSuccess('Logo resmi sekolah berhasil diunggah dan disimpan!');
     };
     reader.onerror = () => {

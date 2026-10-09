@@ -6,6 +6,7 @@ import {
   getInitialExams,
   getInitialAttempts,
   getInitialSettings,
+  getStoredSettings,
   saveUsers,
   saveSubjects,
   saveExams,
@@ -171,7 +172,20 @@ export default function App() {
         supabaseService.getExamAttempts(),
       ]);
 
-      if (sbSettings) setSettings(sbSettings);
+      if (sbSettings) {
+        const local = getStoredSettings();
+        const mergedSettings: SchoolSettings = {
+          ...local,
+          ...sbSettings,
+          appName: sbSettings.appName || local.appName || 'SMART CBT PRO',
+          schoolName: sbSettings.schoolName || local.schoolName,
+          dinasName: sbSettings.dinasName || local.dinasName || '',
+          kabupatenName: sbSettings.kabupatenName || local.kabupatenName || '',
+          signatureLocation: sbSettings.signatureLocation || local.signatureLocation || '',
+        };
+        setSettings(mergedSettings);
+        saveSettings(mergedSettings);
+      }
       if (sbUsers && sbUsers.length > 0) setUsers(sbUsers);
       if (sbSubjects && sbSubjects.length > 0) setSubjects(sbSubjects);
       if (sbExams) {
@@ -412,6 +426,18 @@ export default function App() {
     }
   }, [settings, isDataLoaded]);
 
+  const handleUpdateSettings = useCallback(async (newSettings: SchoolSettings) => {
+    setSettings(newSettings);
+    saveSettings(newSettings);
+    if (getSupabaseConfig().isConfigured) {
+      try {
+        await supabaseService.saveSchoolSettings(newSettings);
+      } catch (err) {
+        console.warn('Gagal menyimpan profil sekolah ke Supabase:', err);
+      }
+    }
+  }, []);
+
   // Fungsi sinkronisasi manual saat tombol "Simpan & Sinkronkan" diklik di modal
   const handleManualSync = async () => {
     const supabase = getSupabase();
@@ -535,7 +561,7 @@ export default function App() {
               onUpdateUsers={setUsers}
               onUpdateCurrentUser={setCurrentUser}
               onUpdateSubjects={setSubjects}
-              onUpdateSettings={setSettings}
+              onUpdateSettings={handleUpdateSettings}
               onOpenSupabaseModal={() => setIsSupabaseModalOpen(true)}
               onLogout={handleLogout}
             />
