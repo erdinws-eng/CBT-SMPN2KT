@@ -10,6 +10,7 @@ import {
 } from 'lucide-react';
 import { User, UserRole, SchoolSettings } from '../types';
 import { getSupabaseConfig } from '../lib/supabase';
+import { getTursoConfig, getActiveDbProvider } from '../lib/turso';
 
 interface NavbarProps {
   currentUser: User | null;
@@ -18,6 +19,7 @@ interface NavbarProps {
   onRoleSwitch?: (role: UserRole) => void;
   onResetData?: () => void;
   onOpenSupabaseModal?: () => void;
+  onOpenTursoModal?: () => void;
   settings: SchoolSettings;
   activeView?: 'admin' | 'guru' | 'siswa' | 'login';
 }
@@ -29,11 +31,14 @@ export default function Navbar({
   onRoleSwitch,
   onResetData,
   onOpenSupabaseModal,
+  onOpenTursoModal,
   settings,
 }: NavbarProps) {
   if (!currentUser) return null;
 
   const isSupabaseActive = getSupabaseConfig().isConfigured;
+  const isTursoActive = getTursoConfig().isConfigured;
+  const activeDbProvider = getActiveDbProvider();
 
   const handleSwitch = (role: UserRole) => {
     if (onRoleSwitch) onRoleSwitch(role);
@@ -94,6 +99,46 @@ export default function Navbar({
                 <span>{roleBadge.label}</span>
               </div>
             </div>
+
+            {/* Database Cloud Indicator Button */}
+            {(isTursoActive || isSupabaseActive || onOpenTursoModal) && (
+              <button
+                onClick={onOpenTursoModal || onOpenSupabaseModal}
+                className={`hidden lg:flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-bold border transition cursor-pointer ${
+                  activeDbProvider === 'turso' && isTursoActive
+                    ? 'bg-teal-50 border-teal-200 text-teal-800 hover:bg-teal-100'
+                    : activeDbProvider === 'supabase' && isSupabaseActive
+                    ? 'bg-indigo-50 border-indigo-200 text-indigo-800 hover:bg-indigo-100'
+                    : 'bg-slate-50 border-slate-200 text-slate-600 hover:bg-slate-100'
+                }`}
+                title="Kelola Database Turso / Supabase"
+              >
+                <Database
+                  className={`w-3.5 h-3.5 ${
+                    activeDbProvider === 'turso' && isTursoActive
+                      ? 'text-teal-600'
+                      : activeDbProvider === 'supabase' && isSupabaseActive
+                      ? 'text-indigo-600'
+                      : 'text-slate-400'
+                  }`}
+                />
+                <span>
+                  {activeDbProvider === 'turso' && isTursoActive
+                    ? 'Turso DB'
+                    : activeDbProvider === 'supabase' && isSupabaseActive
+                    ? 'Supabase'
+                    : 'Turso Setup'}
+                </span>
+                <span
+                  className={`w-2 h-2 rounded-full ${
+                    (activeDbProvider === 'turso' && isTursoActive) ||
+                    (activeDbProvider === 'supabase' && isSupabaseActive)
+                      ? 'bg-emerald-500 animate-pulse'
+                      : 'bg-amber-400'
+                  }`}
+                />
+              </button>
+            )}
 
             {/* User Pill */}
             <div className="flex items-center gap-2.5 pl-2 py-1 bg-slate-50 rounded-xl border border-slate-200">

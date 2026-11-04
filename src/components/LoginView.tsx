@@ -14,6 +14,7 @@ interface LoginViewProps {
   onLoginSuccess: (user: User) => void;
   settings: SchoolSettings;
   onOpenSupabaseModal?: () => void;
+  onOpenTursoModal?: () => void;
 }
 
 export default function LoginView({
@@ -21,6 +22,7 @@ export default function LoginView({
   onLoginSuccess,
   settings,
   onOpenSupabaseModal,
+  onOpenTursoModal,
 }: LoginViewProps) {
   const [username, setUsername] = useState('');
   const [password, setPassword] = useState('');
@@ -208,16 +210,25 @@ export default function LoginView({
       {/* Footer Minimalis */}
       <footer className="w-full py-4 text-center text-[11px] text-slate-400 relative z-10">
         © {new Date().getFullYear()} {settings.schoolName || 'SMP NEGERI 1 CERDAS MANDIRI'} • Sistem CBT
-        {onOpenSupabaseModal && (
-          <div className="mt-2">
+        <div className="mt-2 flex items-center justify-center gap-4 text-[11px]">
+          {onOpenTursoModal && (
+            <button 
+              onClick={onOpenTursoModal}
+              className="text-teal-400 hover:text-teal-300 font-semibold transition cursor-pointer"
+            >
+              Setup Database Turso
+            </button>
+          )}
+          {onOpenSupabaseModal && onOpenTursoModal && <span className="text-slate-600">•</span>}
+          {onOpenSupabaseModal && (
             <button 
               onClick={onOpenSupabaseModal}
-              className="text-indigo-400/70 hover:text-indigo-400 transition cursor-pointer"
+              className="text-indigo-400/80 hover:text-indigo-400 transition cursor-pointer"
             >
-              Konfigurasi Database (Supabase)
+              Supabase
             </button>
-          </div>
-        )}
+          )}
+        </div>
       </footer>
     </div>
   );

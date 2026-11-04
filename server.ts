@@ -254,6 +254,420 @@ Semua butir soal HARUS berjenis sesuai daftar di atas. Seluruh konten dalam baha
   }
 });
 
+// ==============================================================================
+// TURSO DATABASE PROXY ENDPOINTS (Prevents CORS & Network Issues)
+// ==============================================================================
+import { createClient as createLibsqlClient } from "@libsql/client/web";
+
+function normalizeTursoUrl(rawUrl: string): { url: string; error?: string } {
+  let url = (rawUrl || "").trim().replace(/^['"]+|['"]+$/g, "");
+  if (!url) {
+    return { url: "", error: "URL Database Turso belum diisi." };
+  }
+  if (url.includes("turso.tech/app") || url.includes("app.turso.tech")) {
+    return {
+      url: "",
+      error: "URL yang Anda masukkan adalah tautan halaman web Dashboard Turso. Salin URL database yang sebenarnya di halaman Overview (contoh: libsql://cbt-sekolah-username.turso.io atau https://cbt-sekolah-username.turso.io).",
+    };
+  }
+  if (!url.startsWith("http://") && !url.startsWith("https://") && !url.startsWith("libsql://")) {
+    url = "https://" + url;
+  }
+  if (url.startsWith("libsql://")) {
+    url = url.replace("libsql://", "https://");
+  }
+  return { url };
+}
+
+function normalizeTursoToken(rawToken: string): string {
+  let token = (rawToken || "").trim().replace(/^['"]+|['"]+$/g, "");
+  if (token.toLowerCase().startsWith("bearer ")) {
+    token = token.substring(7).trim();
+  }
+  return token;
+}
+
+// 1. Test Turso Connection
+app.post("/api/turso/test", async (req, res) => {
+  try {
+    const { url: rawUrl, authToken: rawToken } = req.body;
+    const { url, error: urlError } = normalizeTursoUrl(rawUrl);
+    if (urlError) {
+      return res.status(400).json({ success: false, message: urlError, tablesFound: [] });
+    }
+
+    const authToken = normalizeTursoToken(rawToken);
+    if (!authToken) {
+      return res.status(400).json({
+        success: false,
+        message: "Auth Token Turso belum diisi. Buat token di dashboard Turso (tab Tokens) atau jalankan: turso db tokens create <nama-db>.",
+        tablesFound: [],
+      });
+    }
+
+    const client = createLibsqlClient({ url, authToken });
+    const result = await client.execute(
+      "SELECT name FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%' AND name NOT LIKE '_litestream_%'"
+    );
+
+    const tablesFound = result.rows.map((r: any) => String(r.name || r[0]));
+
+    if (tablesFound.length === 0) {
+      return res.json({
+        success: true,
+        message: 'Koneksi ke Turso BERHASIL! Database masih kosong (belum ada tabel CBT). Silakan klik "Buat Tabel Otomatis" atau "Migrasikan Semua Data".',
+        tablesFound,
+        normalizedUrl: url,
+      });
+    }
+
+    return res.json({
+      success: true,
+      message: `Koneksi ke Turso BERHASIL! Ditemukan ${tablesFound.length} tabel: ${tablesFound.join(', ')}.`,
+      tablesFound,
+      normalizedUrl: url,
+    });
+  } catch (err: any) {
+    console.error("Turso test connection error:", err);
+    let msg = err?.message || String(err);
+    if (msg.includes("401") || msg.includes("Unauthorized") || msg.includes("JWT")) {
+      msg = "Autentikasi ditolak (401 Unauthorized). Auth Token salah, kadaluarsa, atau tidak cocok dengan database ini.";
+    } else if (msg.includes("404") || msg.includes("Not Found")) {
+      msg = "Database tidak ditemukan (404 Not Found). Periksa kembali nama database di URL Turso Anda.";
+    } else if (msg.includes("ENOTFOUND") || msg.includes("getaddrinfo")) {
+      msg = "Domain database tidak ditemukan. Periksa apakah alamat URL Turso sudah benar.";
+    }
+    return res.status(400).json({
+      success: false,
+      message: `Gagal tersambung ke Turso: ${msg}`,
+      tablesFound: [],
+    });
+  }
+});
+
+// 2. Initialize Turso Database Schema
+app.post("/api/turso/init-schema", async (req, res) => {
+  try {
+    const { url: rawUrl, authToken: rawToken } = req.body;
+    const { url, error: urlError } = normalizeTursoUrl(rawUrl);
+    if (urlError) return res.status(400).json({ success: false, message: urlError });
+
+    const authToken = normalizeTursoToken(rawToken);
+    if (!authToken) return res.status(400).json({ success: false, message: "Auth Token Turso belum diisi." });
+
+    const client = createLibsqlClient({ url, authToken });
+
+    const ddl = [
+      `CREATE TABLE IF NOT EXISTS school_settings (
+        id TEXT PRIMARY KEY DEFAULT 'default_school',
+        app_name TEXT NOT NULL DEFAULT 'SMART CBT PRO',
+        school_name TEXT NOT NULL DEFAULT 'SMP NEGERI 1 CERDAS MANDIRI',
+        school_npsn TEXT DEFAULT '20210099',
+        school_address TEXT DEFAULT '',
+        school_city TEXT DEFAULT '',
+        academic_year TEXT DEFAULT '2025/2026',
+        semester TEXT DEFAULT 'Genap',
+        principal_name TEXT DEFAULT '',
+        principal_nip TEXT DEFAULT '',
+        logo_url TEXT DEFAULT '',
+        dinas_name TEXT DEFAULT 'PEMERINTAH KABUPATEN KOTABARU',
+        kabupaten_name TEXT DEFAULT 'DINAS PENDIDIKAN DAN KEBUDAYAAN',
+        signature_location TEXT DEFAULT 'Kotabaru',
+        updated_at TEXT DEFAULT CURRENT_TIMESTAMP
+      )`,
+      `CREATE TABLE IF NOT EXISTS users (
+        id TEXT PRIMARY KEY,
+        username TEXT UNIQUE NOT NULL,
+        password TEXT NOT NULL,
+        name TEXT NOT NULL,
+        role TEXT NOT NULL CHECK (role IN ('admin', 'guru', 'siswa')),
+        nip_nisn TEXT DEFAULT '',
+        class_grade TEXT DEFAULT '',
+        gender TEXT DEFAULT 'L' CHECK (gender IN ('L', 'P')),
+        subject_name TEXT DEFAULT '',
+        subject_names TEXT DEFAULT '[]',
+        avatar_url TEXT DEFAULT '',
+        created_at TEXT DEFAULT CURRENT_TIMESTAMP
+      )`,
+      `CREATE TABLE IF NOT EXISTS subjects (
+        id TEXT PRIMARY KEY,
+        code TEXT NOT NULL,
+        name TEXT NOT NULL,
+        grade_level TEXT DEFAULT 'Semua Kelas',
+        teacher_name TEXT DEFAULT '',
+        created_at TEXT DEFAULT CURRENT_TIMESTAMP
+      )`,
+      `CREATE TABLE IF NOT EXISTS exams (
+        id TEXT PRIMARY KEY,
+        title TEXT NOT NULL,
+        subject_id TEXT DEFAULT '',
+        subject_name TEXT NOT NULL,
+        teacher_id TEXT NOT NULL,
+        teacher_name TEXT NOT NULL,
+        target_classes TEXT NOT NULL DEFAULT '[]',
+        start_time TEXT DEFAULT '',
+        end_time TEXT DEFAULT '',
+        duration_minutes INTEGER NOT NULL DEFAULT 60,
+        min_submit_minutes INTEGER NOT NULL DEFAULT 15,
+        kkm REAL NOT NULL DEFAULT 75,
+        allow_retake INTEGER DEFAULT 0,
+        max_retakes INTEGER DEFAULT 1,
+        release_score INTEGER DEFAULT 1,
+        randomize_questions INTEGER DEFAULT 0,
+        randomize_options INTEGER DEFAULT 0,
+        lockdown_browser INTEGER DEFAULT 1,
+        max_violations INTEGER DEFAULT 3,
+        token TEXT DEFAULT '',
+        questions TEXT NOT NULL DEFAULT '[]',
+        status TEXT NOT NULL DEFAULT 'active',
+        is_active INTEGER DEFAULT 1,
+        created_at TEXT DEFAULT CURRENT_TIMESTAMP
+      )`,
+      `CREATE TABLE IF NOT EXISTS exam_attempts (
+        id TEXT PRIMARY KEY,
+        exam_id TEXT NOT NULL,
+        exam_title TEXT NOT NULL,
+        subject_name TEXT NOT NULL,
+        student_id TEXT NOT NULL,
+        student_name TEXT NOT NULL,
+        student_nisn TEXT DEFAULT '',
+        student_class TEXT DEFAULT '',
+        started_at TEXT DEFAULT CURRENT_TIMESTAMP,
+        submitted_at TEXT,
+        answers TEXT NOT NULL DEFAULT '{}',
+        doubtful_answers TEXT DEFAULT '{}',
+        scores TEXT DEFAULT '{}',
+        total_score REAL DEFAULT 0,
+        max_possible_score REAL DEFAULT 100,
+        total_earned_points REAL DEFAULT 0,
+        total_max_points REAL DEFAULT 100,
+        score_percentage REAL DEFAULT 0,
+        passed_kkm INTEGER DEFAULT 0,
+        status TEXT NOT NULL DEFAULT 'in_progress',
+        violation_count INTEGER DEFAULT 0,
+        violation_logs TEXT DEFAULT '[]',
+        teacher_feedback TEXT DEFAULT '',
+        is_graded INTEGER DEFAULT 0,
+        created_at TEXT DEFAULT CURRENT_TIMESTAMP
+      )`,
+      `CREATE INDEX IF NOT EXISTS idx_users_role ON users(role)`,
+      `CREATE INDEX IF NOT EXISTS idx_users_username ON users(username)`,
+      `CREATE INDEX IF NOT EXISTS idx_exams_teacher ON exams(teacher_id)`,
+      `CREATE INDEX IF NOT EXISTS idx_attempts_student_exam ON exam_attempts(student_id, exam_id)`,
+      `CREATE INDEX IF NOT EXISTS idx_attempts_exam ON exam_attempts(exam_id)`,
+      `CREATE INDEX IF NOT EXISTS idx_attempts_status ON exam_attempts(status)`,
+    ];
+
+    for (const sql of ddl) {
+      await client.execute(sql);
+    }
+
+    return res.json({
+      success: true,
+      message: "Tabel dan index SQLite di Turso Database berhasil diinisialisasi!",
+    });
+  } catch (err: any) {
+    console.error("Turso init schema error:", err);
+    return res.status(500).json({
+      success: false,
+      message: `Gagal membuat tabel di Turso: ${err?.message || err}`,
+    });
+  }
+});
+
+// 3. Batch Migrate All Data to Turso
+app.post("/api/turso/migrate", async (req, res) => {
+  try {
+    const { url: rawUrl, authToken: rawToken, settings, users, subjects, exams, attempts } = req.body;
+    const { url, error: urlError } = normalizeTursoUrl(rawUrl);
+    if (urlError) return res.status(400).json({ success: false, message: urlError });
+
+    const authToken = normalizeTursoToken(rawToken);
+    if (!authToken) return res.status(400).json({ success: false, message: "Auth Token belum diisi." });
+
+    const client = createLibsqlClient({ url, authToken });
+
+    // 1. Ensure tables exist
+    const testRes = await client.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='school_settings'");
+    if (!testRes.rows || testRes.rows.length === 0) {
+      // Create tables first
+      const initUrl = "http://127.0.0.1:3000/api/turso/init-schema";
+      await fetch(initUrl, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ url, authToken }),
+      });
+    }
+
+    // 2. Insert/replace settings
+    if (settings) {
+      await client.execute({
+        sql: `INSERT OR REPLACE INTO school_settings (
+          id, app_name, school_name, school_npsn, school_address, school_city,
+          academic_year, semester, principal_name, principal_nip, logo_url,
+          dinas_name, kabupaten_name, signature_location, updated_at
+        ) VALUES ('default_school', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        args: [
+          settings.appName || "SMART CBT PRO",
+          settings.schoolName || "SMP NEGERI 1 CERDAS MANDIRI",
+          settings.schoolNpsn || "",
+          settings.schoolAddress || "",
+          settings.schoolCity || "",
+          settings.academicYear || "2025/2026",
+          settings.semester || "Genap",
+          settings.principalName || "",
+          settings.principalNip || "",
+          settings.logoUrl || "",
+          settings.dinasName || "PEMERINTAH KABUPATEN KOTABARU",
+          settings.kabupatenName || "DINAS PENDIDIKAN DAN KEBUDAYAAN",
+          settings.signatureLocation || "Kotabaru",
+          new Date().toISOString(),
+        ],
+      });
+    }
+
+    // 3. Batch users
+    let userCount = 0;
+    if (Array.isArray(users)) {
+      for (const u of users) {
+        await client.execute({
+          sql: `INSERT OR REPLACE INTO users (
+            id, username, password, name, role, nip_nisn, class_grade, gender, subject_name, subject_names, avatar_url
+          ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+          args: [
+            u.id,
+            u.username,
+            u.password || "123456",
+            u.name,
+            u.role,
+            u.nip_nisn || "",
+            u.classGrade || "",
+            u.gender || "L",
+            u.subjectName || "",
+            JSON.stringify(u.subjectNames || []),
+            u.avatarUrl || "",
+          ],
+        });
+        userCount++;
+      }
+    }
+
+    // 4. Batch subjects
+    let subjectCount = 0;
+    if (Array.isArray(subjects)) {
+      for (const s of subjects) {
+        await client.execute({
+          sql: `INSERT OR REPLACE INTO subjects (id, code, name, grade_level, teacher_name) VALUES (?, ?, ?, ?, ?)`,
+          args: [s.id, s.code, s.name, s.gradeLevel || "Semua Kelas", s.teacherName || ""],
+        });
+        subjectCount++;
+      }
+    }
+
+    // 5. Batch exams
+    let examCount = 0;
+    if (Array.isArray(exams)) {
+      for (const e of exams) {
+        await client.execute({
+          sql: `INSERT OR REPLACE INTO exams (
+            id, title, subject_id, subject_name, teacher_id, teacher_name,
+            target_classes, start_time, end_time, duration_minutes, min_submit_minutes,
+            kkm, allow_retake, max_retakes, release_score, randomize_questions,
+            randomize_options, lockdown_browser, max_violations, token, questions,
+            status, is_active
+          ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+          args: [
+            e.id,
+            e.title,
+            e.subjectId || "",
+            e.subjectName,
+            e.teacherId,
+            e.teacherName,
+            JSON.stringify(e.targetClasses || []),
+            e.startTime || "",
+            e.endTime || "",
+            e.durationMinutes || 60,
+            e.minSubmitMinutes || 15,
+            e.kkm || 75,
+            e.allowRetake ? 1 : 0,
+            e.maxRetakes || 1,
+            e.releaseScore ? 1 : 0,
+            e.randomizeQuestions ? 1 : 0,
+            e.randomizeOptions ? 1 : 0,
+            e.lockdownBrowser ? 1 : 0,
+            e.maxViolations || 3,
+            e.token || "",
+            JSON.stringify(e.questions || []),
+            e.status || "active",
+            e.isActive === false ? 0 : 1,
+          ],
+        });
+        examCount++;
+      }
+    }
+
+    // 6. Batch attempts
+    let attemptCount = 0;
+    if (Array.isArray(attempts)) {
+      for (const a of attempts) {
+        await client.execute({
+          sql: `INSERT OR REPLACE INTO exam_attempts (
+            id, exam_id, exam_title, subject_name, student_id, student_name,
+            student_nisn, student_class, started_at, submitted_at,
+            answers, doubtful_answers, scores, total_score, max_possible_score,
+            total_earned_points, total_max_points, score_percentage, passed_kkm,
+            status, violation_count, violation_logs, teacher_feedback, is_graded
+          ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+          args: [
+            a.id,
+            a.examId,
+            a.examTitle || "Ujian",
+            a.subjectName || "-",
+            a.studentId,
+            a.studentName,
+            a.studentNisn || "",
+            a.studentClass || "",
+            a.startedAt || new Date().toISOString(),
+            a.submittedAt || null,
+            JSON.stringify(a.answers || {}),
+            JSON.stringify(a.doubtfulAnswers || {}),
+            JSON.stringify(a.scores || {}),
+            Number(a.totalScore || 0),
+            Number(a.maxPossibleScore || 100),
+            Number(a.totalEarnedPoints || a.totalScore || 0),
+            Number(a.totalMaxPoints || a.maxPossibleScore || 100),
+            Number(a.scorePercentage || 0),
+            a.passedKkm ? 1 : 0,
+            a.status || "in_progress",
+            Number(a.violationCount || 0),
+            JSON.stringify(Array.isArray(a.violationLogs) ? a.violationLogs : []),
+            a.teacherFeedback || "",
+            a.isGraded ? 1 : 0,
+          ],
+        });
+        attemptCount++;
+      }
+    }
+
+    return res.json({
+      success: true,
+      message: `Migrasi ke Turso BERHASIL! Data berhasil disalin: ${userCount} Pengguna, ${subjectCount} Mapel, ${examCount} Ujian, dan ${attemptCount} Riwayat Siswa.`,
+      counts: {
+        users: userCount,
+        subjects: subjectCount,
+        exams: examCount,
+        attempts: attemptCount,
+      },
+    });
+  } catch (err: any) {
+    console.error("Turso migrate error:", err);
+    return res.status(500).json({
+      success: false,
+      message: `Gagal migrasi ke Turso: ${err?.message || err}`,
+    });
+  }
+});
+
 // Vite & Static Asset Handling
 async function start() {
   if (process.env.NODE_ENV !== "production") {
