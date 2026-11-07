@@ -2,13 +2,22 @@ import { getTursoClient, initTursoSchema, setTursoAuthError } from '../lib/turso
 import { SchoolSettings, User, Subject, Exam, ExamAttempt } from '../types';
 import { getStoredSettings, saveStoredSettings } from '../lib/storage';
 
+function isTurso401(err: any): boolean {
+  if (!err) return false;
+  const fullText = (
+    String(err?.message || '') + ' ' +
+    String(err?.code || '') + ' ' +
+    String(err?.cause?.message || '') + ' ' +
+    String(err?.cause || '') + ' ' +
+    String(err || '')
+  ).toLowerCase();
+  return fullText.includes('401') || fullText.includes('unauthorized');
+}
+
 function handleTursoError(action: string, err: any): void {
   const msg = String(err?.message || err || '');
-  const status = (err as any)?.status || (err as any)?.code;
-  const is401 = msg.includes('401') || msg.includes('Unauthorized') || status === 401;
-
-  if (is401) {
-    setTursoAuthError('Auth Token Turso tidak valid atau belum diisi (HTTP status 401). Silakan periksa kembali Auth Token di menu Turso DB.');
+  if (isTurso401(err)) {
+    setTursoAuthError('Auth Token Turso tidak valid atau sudah kadaluarsa (HTTP status 401). Silakan periksa kembali Auth Token di menu Turso DB.');
     console.warn(`[Turso ${action}] Autentikasi ditolak (HTTP status 401). Operasi dialihkan ke penyimpanan lokal offline.`);
   } else {
     console.warn(`[Turso ${action}] Kendala:`, msg);

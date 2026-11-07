@@ -1,5 +1,6 @@
 import express from "express";
 import path from "path";
+import fs from "fs";
 import { GoogleGenAI } from "@google/genai";
 import dotenv from "dotenv";
 
@@ -287,18 +288,87 @@ function normalizeTursoToken(rawToken: string): string {
   return token;
 }
 
+const TURSO_CONFIG_FILE = path.join(process.cwd(), "turso-config.json");
+
+function getStoredTursoConfig(): { url: string; authToken: string; isConfigured: boolean } {
+  try {
+    if (fs.existsSync(TURSO_CONFIG_FILE)) {
+      const data = JSON.parse(fs.readFileSync(TURSO_CONFIG_FILE, "utf-8"));
+      if (data.url && data.authToken) {
+        return {
+          url: data.url,
+          authToken: data.authToken,
+          isConfigured: true,
+        };
+      }
+    }
+  } catch (e) {
+    console.warn("Failed to read turso-config.json:", e);
+  }
+
+  const envUrl = process.env.VITE_TURSO_DATABASE_URL || process.env.TURSO_DATABASE_URL || "";
+  const envToken = process.env.VITE_TURSO_AUTH_TOKEN || process.env.TURSO_AUTH_TOKEN || "";
+  if (envUrl && envToken) {
+    return {
+      url: envUrl,
+      authToken: envToken,
+      isConfigured: true,
+    };
+  }
+
+  return { url: "", authToken: "", isConfigured: false };
+}
+
+function saveStoredTursoConfig(url: string, authToken: string): void {
+  try {
+    fs.writeFileSync(
+      TURSO_CONFIG_FILE,
+      JSON.stringify({ url, authToken, updatedAt: new Date().toISOString() }, null, 2),
+      "utf-8"
+    );
+  } catch (e) {
+    console.warn("Failed to save turso-config.json:", e);
+  }
+}
+
+// 0. Get & Save Shared Turso Database Configuration (Cross-Browser Shared)
+app.get("/api/turso/config", (req, res) => {
+  const config = getStoredTursoConfig();
+  res.json(config);
+});
+
+app.post("/api/turso/config", (req, res) => {
+  const { url: rawUrl, authToken: rawToken } = req.body;
+  const { url, error: urlError } = normalizeTursoUrl(rawUrl);
+  if (urlError) return res.status(400).json({ success: false, message: urlError });
+  const authToken = normalizeTursoToken(rawToken);
+  if (!authToken) return res.status(400).json({ success: false, message: "Auth Token belum diisi." });
+
+  saveStoredTursoConfig(url, authToken);
+  res.json({ success: true, message: "Konfigurasi Turso berhasil disimpan dan dibagikan ke semua perangkat.", url, authToken });
+});
+
+app.delete("/api/turso/config", (req, res) => {
+  try {
+    if (fs.existsSync(TURSO_CONFIG_FILE)) {
+      fs.unlinkSync(TURSO_CONFIG_FILE);
+    }
+  } catch (e) {}
+  res.json({ success: true, message: "Konfigurasi Turso berhasil dihapus dari server." });
+});
+
 // 1. Test Turso Connection
 app.post("/api/turso/test", async (req, res) => {
   try {
     const { url: rawUrl, authToken: rawToken } = req.body;
     const { url, error: urlError } = normalizeTursoUrl(rawUrl);
     if (urlError) {
-      return res.status(400).json({ success: false, message: urlError, tablesFound: [] });
+      return res.json({ success: false, message: urlError, tablesFound: [] });
     }
 
     const authToken = normalizeTursoToken(rawToken);
     if (!authToken) {
-      return res.status(400).json({
+      return res.json({
         success: false,
         message: "Auth Token Turso belum diisi. Buat token di dashboard Turso (tab Tokens) atau jalankan: turso db tokens create <nama-db>.",
         tablesFound: [],
@@ -328,17 +398,22 @@ app.post("/api/turso/test", async (req, res) => {
       normalizedUrl: url,
     });
   } catch (err: any) {
-    console.error("Turso test connection error:", err);
-    let msg = err?.message || String(err);
-    if (msg.includes("401") || msg.includes("Unauthorized") || msg.includes("JWT")) {
-      msg = "Autentikasi ditolak (401 Unauthorized). Auth Token salah, kadaluarsa, atau tidak cocok dengan database ini.";
+    const errMsg = String(err?.message || err || '');
+    const is401 = errMsg.includes("401") || errMsg.includes("Unauthorized") || String(err?.cause || '').includes("401");
+    
+    console.warn(`[Turso Test] Result: ${is401 ? '401 Unauthorized' : errMsg}`);
+    
+    let msg = errMsg;
+    if (is401) {
+      msg = "Autentikasi ditolak (HTTP status 401 Unauthorized). Auth Token yang dimasukkan tidak valid atau sudah kadaluarsa. Pastikan Anda menyalin Auth Token dari menu Tokens di database Turso Anda, atau buat token baru dengan perintah: turso db tokens create <nama-db>.";
     } else if (msg.includes("404") || msg.includes("Not Found")) {
       msg = "Database tidak ditemukan (404 Not Found). Periksa kembali nama database di URL Turso Anda.";
     } else if (msg.includes("ENOTFOUND") || msg.includes("getaddrinfo")) {
       msg = "Domain database tidak ditemukan. Periksa apakah alamat URL Turso sudah benar.";
     }
-    return res.status(400).json({
+    return res.json({
       success: false,
+      isAuthError: is401,
       message: `Gagal tersambung ke Turso: ${msg}`,
       tablesFound: [],
     });

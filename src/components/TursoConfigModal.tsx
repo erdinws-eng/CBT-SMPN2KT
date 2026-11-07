@@ -386,30 +386,16 @@ turso db tokens create cbt-sekolah`;
                 <div className="flex items-center gap-2">
                   <span
                     className={`w-2.5 h-2.5 rounded-full ${
-                      activeProvider === 'turso' && getTursoConfig().isConfigured
+                      getTursoConfig().isConfigured
                         ? 'bg-emerald-500 animate-pulse'
                         : 'bg-amber-400'
                     }`}
                   />
-                  <span className="font-bold text-slate-700">Database Aktif Aplikasi:</span>
+                  <span className="font-bold text-slate-700">Status Database Utama:</span>
                   <span className="font-extrabold text-emerald-700">
-                    {activeProvider === 'turso' ? 'Turso Database (LibSQL)' : activeProvider === 'supabase' ? 'Supabase' : 'Lokal (Offline)'}
+                    {getTursoConfig().isConfigured ? 'Turso Database (Tersambung & Sinkron)' : 'Penyimpanan Lokal (Offline)'}
                   </span>
                 </div>
-                {activeProvider !== 'turso' && getTursoConfig().isConfigured && (
-                  <button
-                    onClick={() => {
-                      setActiveDbProvider('turso');
-                      setTestResult({
-                        success: true,
-                        message: 'Berhasil beralih ke Turso Database!',
-                      });
-                    }}
-                    className="text-[11px] font-bold text-emerald-600 hover:underline cursor-pointer"
-                  >
-                    Jadikan Turso Aktif
-                  </button>
-                )}
               </div>
 
               {/* Active Auth Error Banner (e.g. 401 Unauthorized) */}

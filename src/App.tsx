@@ -18,17 +18,19 @@ import {
   getDeletedAttemptIds,
   addDeletedAttemptIds,
 } from './lib/storage';
-import { getSupabase, getSupabaseConfig } from './lib/supabase';
-import { getTursoConfig, getActiveDbProvider } from './lib/turso';
-import { supabaseService } from './services/supabaseService';
+import { syncTursoConfigWithServer } from './lib/turso';
 import { unifiedDbService, isCloudDbConfigured } from './services/unifiedDbService';
 import Navbar from './components/Navbar';
 import LoginView from './components/LoginView';
 import AdminPanel from './components/AdminPanel';
 import GuruPanel from './components/GuruPanel';
 import SiswaPanel from './components/SiswaPanel';
-import SupabaseConfigModal from './components/SupabaseConfigModal';
 import TursoConfigModal from './components/TursoConfigModal';
+
+// Cross-tab realtime synchronization channel
+const syncChannel = typeof window !== 'undefined' && 'BroadcastChannel' in window
+  ? new BroadcastChannel('cbt_turso_sync_channel')
+  : null;
 
 export default function App() {
   const [users, setUsers] = useState<User[]>(getInitialUsers);
@@ -37,7 +39,6 @@ export default function App() {
   const [attempts, setAttempts] = useState<ExamAttempt[]>(getInitialAttempts);
   const [settings, setSettings] = useState<SchoolSettings>(getInitialSettings);
   const [currentUser, setCurrentUser] = useState<User | null>(null);
-  const [isSupabaseModalOpen, setIsSupabaseModalOpen] = useState<boolean>(false);
   const [isTursoModalOpen, setIsTursoModalOpen] = useState<boolean>(false);
   const [isDataLoaded, setIsDataLoaded] = useState<boolean>(false);
 
@@ -50,17 +51,17 @@ export default function App() {
 
   const isFetchingRef = useRef(false);
 
-  // Helper untuk menggabungkan attempts server dengan lokal secara konsisten & aman
+  // Helper untuk menggabungkan attempts server Turso dengan lokal secara konsisten & aman
   const mergeAttemptsHelper = useCallback(
-    (prevAttempts: ExamAttempt[], sbAttempts: ExamAttempt[]) => {
+    (prevAttempts: ExamAttempt[], tursoAttempts: ExamAttempt[]) => {
       const deletedExamIds = getDeletedExamIds();
       const deletedAttemptIds = getDeletedAttemptIds();
       deletedExamIds.forEach((id) => deletedExamIdsRef.current.add(id));
       deletedAttemptIds.forEach((id) => deletedAttemptIdsRef.current.add(id));
 
-      // Buat map dari server database, buang yang sudah dihapus/direset atau ujiannya dihapus
+      // Buat map dari database Turso, buang yang sudah dihapus/direset atau ujiannya dihapus
       const serverMap = new Map<string, ExamAttempt>();
-      sbAttempts.forEach((a) => {
+      tursoAttempts.forEach((a) => {
         if (deletedAttemptIdsRef.current.has(a.id) || deletedExamIdsRef.current.has(a.examId)) {
           unifiedDbService.deleteExamAttempt(a.id);
           return;
@@ -84,18 +85,15 @@ export default function App() {
         const server = serverMap.get(local.id);
         if (!server) {
           merged.push(local);
-          // JIKA lokal berstatus 'submitted' atau 'violation_disqualified' tetapi belum ada di server
-          // (misal karena siswa me-refresh browser atau koneksi tertunda saat pengiriman):
-          // Kirimkan otomatis ke Cloud Database di latar belakang agar data tidak hilang!
+          // JIKA lokal berstatus 'submitted' atau 'violation_disqualified' tetapi belum ada di database Turso:
+          // Kirimkan otomatis ke Turso di latar belakang agar data tidak hilang!
           if (local.status === 'submitted' || local.status === 'violation_disqualified') {
             unifiedDbService.saveExamAttempt(local);
           }
         } else {
           // 1. Siswa telah selesai mengerjakan ujian (status: 'submitted'):
-          // JANGAN PERNAH menimpa attempt yang sudah submitted dengan status in_progress!
           if (local.status === 'submitted') {
             if (server.status === 'submitted') {
-              // Keduanya submitted, pertahankan yang datanya paling lengkap / skor lebih tinggi
               const localScore = local.totalScore ?? local.scorePercentage ?? 0;
               const serverScore = server.totalScore ?? server.scorePercentage ?? 0;
               if (localScore >= serverScore) {
@@ -105,7 +103,6 @@ export default function App() {
               }
             } else {
               // Lokal sudah selesai diserahkan, sedangkan server masih 'in_progress' atau lama.
-              // LOKAL HARUS MENANG! Sekaligus simpan ke database agar status server segera diperbarui.
               merged.push(local);
               unifiedDbService.saveExamAttempt(local);
             }
@@ -129,7 +126,6 @@ export default function App() {
       serverMap.forEach((server) => {
         if (deletedAttemptIdsRef.current.has(server.id) || deletedExamIdsRef.current.has(server.examId)) return;
         const studentExamKey = `${server.studentId}_${server.examId}`;
-        // Jika untuk siswa dan ujian ini lokal sudah submitted, jangan tambahkan in_progress server
         if (server.status === 'in_progress' && localSubmittedMap.has(studentExamKey)) {
           unifiedDbService.deleteExamAttempt(server.id);
           return;
@@ -137,9 +133,6 @@ export default function App() {
         merged.push(server);
       });
 
-      // PEMBERSIHAN DUPLIKAT & STALE IN_PROGRESS PER (studentId, examId):
-      // Jika untuk seorang siswa pada ujian tertentu sudah ada attempt 'submitted',
-      // maka attempt 'in_progress' basi untuk ujian tersebut HARUS DIBUANG agar ujian tidak tampak belum selesai.
       const submittedKeys = new Set(
         merged
           .filter((a) => a.status === 'submitted')
@@ -148,7 +141,6 @@ export default function App() {
 
       const finalMerged = merged.filter((a) => {
         if (a.status === 'in_progress' && submittedKeys.has(`${a.studentId}_${a.examId}`)) {
-          // Hapus juga attempt in_progress basi ini dari database agar bersih permanen
           unifiedDbService.deleteExamAttempt(a.id);
           return false;
         }
@@ -161,7 +153,7 @@ export default function App() {
     []
   );
 
-  // 1. Memuat SEMUA data (Settings, Users, Subjects, Exams, Attempts) dari database aktif (Turso / Supabase)
+  // 1. Memuat SEMUA data (Settings, Users, Subjects, Exams, Attempts) dari Database Turso
   const loadAllData = useCallback(async () => {
     if (!isCloudDbConfigured()) return;
 
@@ -189,8 +181,14 @@ export default function App() {
         setSettings(mergedSettings);
         saveSettings(mergedSettings);
       }
-      if (dbUsers && dbUsers.length > 0) setUsers(dbUsers);
-      if (dbSubjects && dbSubjects.length > 0) setSubjects(dbSubjects);
+      if (dbUsers && dbUsers.length > 0) {
+        setUsers(dbUsers);
+        saveUsers(dbUsers);
+      }
+      if (dbSubjects && dbSubjects.length > 0) {
+        setSubjects(dbSubjects);
+        saveSubjects(dbSubjects);
+      }
       if (dbExams) {
         const deletedIds = getDeletedExamIds();
         dbExams.forEach((e) => {
@@ -201,7 +199,9 @@ export default function App() {
         const validExams = dbExams.filter(
           (e) => !deletedIds.has(e.id) && !deletedExamIdsRef.current.has(e.id)
         );
-        setExams(sanitizeExams(validExams));
+        const sanitized = sanitizeExams(validExams);
+        setExams(sanitized);
+        saveExams(sanitized);
       }
       if (dbAttempts) {
         setAttempts((prev) => mergeAttemptsHelper(prev, dbAttempts));
@@ -211,12 +211,12 @@ export default function App() {
         isFetchingRef.current = false;
       }, 300);
     } catch (err) {
-      console.warn('Gagal memuat seluruh data dari cloud database:', err);
+      console.warn('Gagal memuat seluruh data dari Turso database:', err);
       isFetchingRef.current = false;
     }
   }, [mergeAttemptsHelper]);
 
-  // 2. Memuat HANYA data Exam Attempts (Sangat ringan & cepat, < 50ms) - untuk polling berkala & realtime
+  // 2. Memuat HANYA data Exam Attempts (Sangat ringan & cepat, < 50ms) - untuk polling monitor
   const loadAttempts = useCallback(async () => {
     if (!isCloudDbConfigured()) return;
 
@@ -226,73 +226,65 @@ export default function App() {
         setAttempts((prev) => mergeAttemptsHelper(prev, dbAttempts));
       }
     } catch (err) {
-      console.warn('Gagal memuat attempts dari database:', err);
+      console.warn('Gagal memuat attempts dari Turso:', err);
     }
   }, [mergeAttemptsHelper]);
 
-  // Kompatibilitas untuk onRefreshData
-  const loadDataFromSupabase = loadAttempts;
-  const loadAllDataFromSupabase = loadAllData;
-
-  // Memuat seluruh data saat awal aplikasi dimulai jika database cloud terkonfigurasi
+  // Inisialisasi awal aplikasi:
+  // Ambil shared config Turso dari server terlebih dahulu agar semua browser otomatis tersambung!
   useEffect(() => {
-    if (isCloudDbConfigured()) {
-      loadAllData();
-    }
+    (async () => {
+      await syncTursoConfigWithServer();
+      if (isCloudDbConfigured()) {
+        await loadAllData();
+      }
+    })();
   }, [loadAllData]);
 
-  // Polling pintar & hemat bandwidth:
-  // - Guru / Admin: Polling attempts setiap 3.5 detik (hanya 1 query ringan ke exam_attempts)
-  // - Siswa: Hanya polling saat tab aktif di dashboard (setiap 12 detik)
-  // - Supabase Realtime WebSocket subscription jika Supabase yang aktif
+  // Polling pintar antar-browser agar seluruh data selalu sinkron:
+  // - Guru / Admin: Polling attempts setiap 3 detik, dan periksa ujian/mapel/users setiap 6 detik
+  // - Siswa: Polling berkala setiap 8 detik agar ujian baru langsung muncul
+  // - Window focus & visibilitychange: Seketika tab difokuskan, muat data terbaru dari Turso
   useEffect(() => {
     if (!isCloudDbConfigured() || !currentUser) return;
 
-    let pollIntervalMs = 0;
+    let attemptsInterval: any = null;
+    let fullInterval: any = null;
+
     if (currentUser.role === 'guru' || currentUser.role === 'admin') {
-      pollIntervalMs = 3500; // Guru memantau ujian
-    } else if (currentUser.role === 'siswa') {
-      pollIntervalMs = 12000; // Siswa di dashboard polling santai
-    }
-
-    let interval: any = null;
-    if (pollIntervalMs > 0) {
-      interval = setInterval(() => {
+      attemptsInterval = setInterval(() => {
         loadAttempts();
-      }, pollIntervalMs);
+      }, 3000);
+
+      fullInterval = setInterval(() => {
+        loadAllData();
+      }, 7000);
+    } else if (currentUser.role === 'siswa') {
+      fullInterval = setInterval(() => {
+        loadAllData();
+      }, 8500);
     }
 
-    // Ambil data seketika saat tab dibuka / difokuskan kembali
     const handleFocusOrVisible = () => {
       if (!document.hidden) {
-        loadAttempts();
+        loadAllData();
       }
     };
+
     window.addEventListener('focus', handleFocusOrVisible);
     document.addEventListener('visibilitychange', handleFocusOrVisible);
 
-    // Supabase Realtime WebSocket subscription jika Supabase aktif
-    const isStaff = currentUser.role === 'guru' || currentUser.role === 'admin';
-    const supabase = getSupabase();
-    let channel: any = null;
-    if (supabase && isStaff && getActiveDbProvider() === 'supabase') {
-      try {
-        channel = supabase
-          .channel('realtime_exam_attempts_sync')
-          .on(
-            'postgres_changes',
-            { event: '*', schema: 'public', table: 'exam_attempts' },
-            () => {
-              loadAttempts();
-            }
-          )
-          .subscribe();
-      } catch (err) {
-        console.warn('Gagal mengaktifkan realtime Supabase:', err);
+    // Dengar pesan dari tab lain di browser yang sama
+    const handleBroadcast = (event: MessageEvent) => {
+      if (event.data?.type === 'CBT_DATA_MUTATED') {
+        loadAllData();
       }
+    };
+    if (syncChannel) {
+      syncChannel.addEventListener('message', handleBroadcast);
     }
 
-    // Pemulihan otomatis jika ada attempt yang tertunda saat koneksi terputus/offline/refresh
+    // Pemulihan otomatis jika ada attempt yang tertunda saat koneksi terputus/offline
     const flushPendingAttempts = () => {
       try {
         const keys = Object.keys(localStorage);
@@ -314,18 +306,25 @@ export default function App() {
     flushPendingAttempts();
 
     return () => {
-      if (interval) clearInterval(interval);
+      if (attemptsInterval) clearInterval(attemptsInterval);
+      if (fullInterval) clearInterval(fullInterval);
       window.removeEventListener('focus', handleFocusOrVisible);
       document.removeEventListener('visibilitychange', handleFocusOrVisible);
       window.removeEventListener('online', flushPendingAttempts);
-      if (supabase && channel) {
-        supabase.removeChannel(channel);
+      if (syncChannel) {
+        syncChannel.removeEventListener('message', handleBroadcast);
       }
     };
-  }, [currentUser, loadAttempts]);
+  }, [currentUser, loadAttempts, loadAllData]);
 
-  // Sync state changes with localStorage & database (HANYA untuk Guru & Admin!)
-  // Siswa TIDAK BOLEH menulis ulang data users, subjects, atau exams ke database agar tidak overload
+  // Helper broadcast perubahan data ke tab lain
+  const notifyMutation = useCallback(() => {
+    if (syncChannel) {
+      syncChannel.postMessage({ type: 'CBT_DATA_MUTATED', timestamp: Date.now() });
+    }
+  }, []);
+
+  // Sync perubahan data users ke Turso secara langsung (Hanya Guru & Admin)
   useEffect(() => {
     saveUsers(users);
     if (currentUser?.role !== 'siswa' && isCloudDbConfigured() && isDataLoaded && !isFetchingRef.current) {
@@ -334,10 +333,12 @@ export default function App() {
       prevUsersRef.current.forEach((old) => {
         if (!currentIds.has(old.id)) unifiedDbService.deleteUser(old.id);
       });
+      notifyMutation();
     }
     prevUsersRef.current = users;
-  }, [users, isDataLoaded, currentUser]);
+  }, [users, isDataLoaded, currentUser, notifyMutation]);
 
+  // Sync perubahan data subjects ke Turso secara langsung (Hanya Guru & Admin)
   useEffect(() => {
     saveSubjects(subjects);
     if (currentUser?.role !== 'siswa' && isCloudDbConfigured() && isDataLoaded && !isFetchingRef.current) {
@@ -346,10 +347,12 @@ export default function App() {
       prevSubjectsRef.current.forEach((old) => {
         if (!currentIds.has(old.id)) unifiedDbService.deleteSubject(old.id);
       });
+      notifyMutation();
     }
     prevSubjectsRef.current = subjects;
-  }, [subjects, isDataLoaded, currentUser]);
+  }, [subjects, isDataLoaded, currentUser, notifyMutation]);
 
+  // Sync perubahan data exams ke Turso secara langsung (Hanya Guru & Admin)
   useEffect(() => {
     saveExams(exams);
     if (currentUser?.role !== 'siswa' && isCloudDbConfigured() && isDataLoaded && !isFetchingRef.current) {
@@ -366,18 +369,18 @@ export default function App() {
       if (removedIds.length > 0) {
         addDeletedExamIds(removedIds);
       }
+      notifyMutation();
     }
     prevExamsRef.current = exams;
-  }, [exams, isDataLoaded, currentUser]);
+  }, [exams, isDataLoaded, currentUser, notifyMutation]);
 
   useEffect(() => {
     saveAttempts(attempts);
     prevAttemptsRef.current = attempts;
   }, [attempts]);
 
-  // Handler update attempts yang langsung menyimpan ke localStorage dan database
+  // Handler update attempts yang langsung menyimpan ke localStorage dan database Turso
   const handleUpdateAttempts = useCallback((newAttempts: ExamAttempt[]) => {
-    // 1. Deteksi attempt yang dihapus dan sinkronkan penghapusan ke database secara batch & storage lokal
     const newIds = new Set(newAttempts.map((item) => item.id));
     const toDeleteIds: string[] = [];
 
@@ -403,7 +406,7 @@ export default function App() {
     setAttempts(newAttempts);
     saveAttempts(newAttempts);
 
-    // 2. Simpan perubahan attempt baru atau yang diperbarui ke database
+    // Simpan perubahan attempt baru atau yang diperbarui ke database Turso
     if (isCloudDbConfigured()) {
       newAttempts.forEach((item) => {
         const prev = prevAttemptsRef.current.find((p) => p.id === item.id);
@@ -418,15 +421,11 @@ export default function App() {
         }
       });
     }
-  }, []);
 
-  useEffect(() => {
-    saveSettings(settings);
-    if (isCloudDbConfigured() && isDataLoaded) {
-      unifiedDbService.saveSchoolSettings(settings);
-    }
-  }, [settings, isDataLoaded]);
+    notifyMutation();
+  }, [notifyMutation]);
 
+  // Handler simpan profil sekolah langsung ke database Turso
   const handleUpdateSettings = useCallback(async (newSettings: SchoolSettings) => {
     setSettings(newSettings);
     saveSettings(newSettings);
@@ -434,33 +433,11 @@ export default function App() {
       try {
         await unifiedDbService.saveSchoolSettings(newSettings);
       } catch (err) {
-        console.warn('Gagal menyimpan profil sekolah ke database:', err);
+        console.warn('Gagal menyimpan profil sekolah ke Turso:', err);
       }
     }
-  }, []);
-
-  // Fungsi sinkronisasi manual saat tombol "Simpan & Sinkronkan" diklik di modal
-  const handleManualSync = async () => {
-    if (!isCloudDbConfigured()) return;
-
-    // 1. Unggah data yang saat ini aktif di aplikasi ke tabel database
-    await unifiedDbService.saveSchoolSettings(settings);
-    for (const u of users) {
-      await unifiedDbService.saveUser(u);
-    }
-    for (const s of subjects) {
-      await unifiedDbService.saveSubject(s);
-    }
-    for (const e of exams) {
-      await unifiedDbService.saveExam(e);
-    }
-    for (const a of attempts) {
-      await unifiedDbService.saveExamAttempt(a);
-    }
-
-    // 2. Muat ulang data terbaru
-    await loadDataFromSupabase();
-  };
+    notifyMutation();
+  }, [notifyMutation]);
 
   const handleUpdateExams = useCallback((newExams: Exam[]) => {
     const sanitized = sanitizeExams(newExams);
@@ -489,7 +466,6 @@ export default function App() {
           });
         } catch (e) {}
       });
-      // Hapus otomatis seluruh attempts siswa yang terafiliasi dengan paket ujian yang dihapus
       setAttempts((prev) => {
         const kept = prev.filter((a) => !deletedExamIds.includes(a.examId));
         saveAttempts(kept);
@@ -499,9 +475,9 @@ export default function App() {
 
     setExams(sanitized);
     saveExams(sanitized);
-  }, []);
+    notifyMutation();
+  }, [notifyMutation]);
 
-  // Role switch handler from Navbar
   const handleRoleSwitch = (newRole: UserRole) => {
     const targetUser = users.find((u) => u.role === newRole);
     if (targetUser) {
@@ -513,6 +489,8 @@ export default function App() {
     setCurrentUser(null);
   };
 
+  const isTursoConfigured = isCloudDbConfigured();
+
   // If no user is logged in, show the comprehensive CBT Login portal
   if (!currentUser) {
     return (
@@ -523,13 +501,7 @@ export default function App() {
           onLoginSuccess={(user) => {
             setCurrentUser(user);
           }}
-          onOpenSupabaseModal={() => setIsSupabaseModalOpen(true)}
           onOpenTursoModal={() => setIsTursoModalOpen(true)}
-        />
-        <SupabaseConfigModal
-          isOpen={isSupabaseModalOpen}
-          onClose={() => setIsSupabaseModalOpen(false)}
-          onSyncNow={handleManualSync}
         />
         <TursoConfigModal
           isOpen={isTursoModalOpen}
@@ -560,7 +532,6 @@ export default function App() {
             currentUser={currentUser}
             onLogout={handleLogout}
             onRoleSwitch={handleRoleSwitch}
-            onOpenSupabaseModal={() => setIsSupabaseModalOpen(true)}
             onOpenTursoModal={() => setIsTursoModalOpen(true)}
             settings={settings}
           />
@@ -578,7 +549,6 @@ export default function App() {
               onUpdateCurrentUser={setCurrentUser}
               onUpdateSubjects={setSubjects}
               onUpdateSettings={handleUpdateSettings}
-              onOpenSupabaseModal={() => setIsSupabaseModalOpen(true)}
               onOpenTursoModal={() => setIsTursoModalOpen(true)}
               onLogout={handleLogout}
             />
@@ -594,9 +564,9 @@ export default function App() {
               settings={settings}
               onUpdateExams={handleUpdateExams}
               onUpdateAttempts={handleUpdateAttempts}
-              onOpenSupabaseModal={() => setIsSupabaseModalOpen(true)}
+              onOpenTursoModal={() => setIsTursoModalOpen(true)}
               onLogout={handleLogout}
-              onRefreshData={loadDataFromSupabase}
+              onRefreshData={loadAttempts}
             />
           )}
 
@@ -607,7 +577,7 @@ export default function App() {
               attempts={attempts}
               settings={settings}
               onUpdateAttempts={handleUpdateAttempts}
-              onRefreshData={loadDataFromSupabase}
+              onRefreshData={loadAllData}
             />
           )}
         </main>
@@ -621,8 +591,8 @@ export default function App() {
               © {new Date().getFullYear()} {settings.schoolName} (NPSN: {settings.schoolNpsn}) • Sistem CBT & Asesmen SMP
             </span>
             <div className="flex items-center gap-4 text-[11px] text-slate-400">
-              <span>
-                Database {getActiveDbProvider() === 'turso' ? 'Turso LibSQL SQLite' : 'Supabase PostgreSQL'}
+              <span className="font-semibold text-emerald-700">
+                Database {isTursoConfigured ? 'Turso LibSQL SQLite (Aktif Terhubung)' : 'Penyimpanan Lokal'}
               </span>
               <span>•</span>
               <span>Anti-Curang Lockdown Browser</span>
@@ -632,13 +602,6 @@ export default function App() {
           </div>
         </footer>
       )}
-
-      {/* Supabase Config Modal */}
-      <SupabaseConfigModal
-        isOpen={isSupabaseModalOpen}
-        onClose={() => setIsSupabaseModalOpen(false)}
-        onSyncNow={handleManualSync}
-      />
 
       {/* Turso Database Migration & Config Modal */}
       <TursoConfigModal

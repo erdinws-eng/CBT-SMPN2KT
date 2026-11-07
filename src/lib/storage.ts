@@ -531,8 +531,7 @@ export function setCurrentUser(user: User | null) {
   }
 }
 export function resetToDemoData() {
-  // Demo data di Supabase bisa dilakukan via SQL seeder
-  alert("Fungsi reset ke demo data dinonaktifkan karena aplikasi menggunakan Supabase secara penuh. Silakan import data melalui SQL Supabase.");
+  console.info("Fungsi reset ke demo data dinonaktifkan karena aplikasi menggunakan Turso Database secara terpusat.");
 }
 
 // Aliases for clean App.tsx access

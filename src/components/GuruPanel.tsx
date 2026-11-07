@@ -64,8 +64,8 @@ import {
   parseSoalExcel,
   parseDocxTextQuestions,
 } from '../lib/excelExportImport';
-import { getSupabaseConfig } from '../lib/supabase';
-import { supabaseService } from '../services/supabaseService';
+import { tursoService } from '../services/tursoService';
+import { isCloudDbConfigured, unifiedDbService } from '../services/unifiedDbService';
 
 import RekapPrintModal from './RekapPrintModal';
 
@@ -78,7 +78,7 @@ interface GuruPanelProps {
   settings: SchoolSettings;
   onUpdateExams: (exams: Exam[]) => void;
   onUpdateAttempts: (attempts: ExamAttempt[]) => void;
-  onOpenSupabaseModal?: () => void;
+  onOpenTursoModal?: () => void;
   onLogout?: () => void;
   onRefreshData?: () => Promise<void> | void;
 }
@@ -92,7 +92,7 @@ export default function GuruPanel({
   settings,
   onUpdateExams,
   onUpdateAttempts,
-  onOpenSupabaseModal,
+  onOpenTursoModal,
   onLogout,
   onRefreshData,
 }: GuruPanelProps) {
@@ -144,7 +144,7 @@ export default function GuruPanel({
       if (onRefreshData) {
         await onRefreshData();
       }
-      showToast('Sinkronisasi Berhasil', 'Data ujian dan riwayat siswa berhasil diperbarui dari database Supabase.', 'success');
+      showToast('Sinkronisasi Berhasil', 'Data ujian dan riwayat siswa berhasil diperbarui dari database Turso.', 'success');
     } catch (e) {
       showToast('Sinkronisasi Gagal', 'Gagal memuat data dari database.', 'error');
     } finally {
@@ -167,8 +167,8 @@ export default function GuruPanel({
       return att;
     });
     const updatedAtt = updated.find((a) => a.id === targetAtt.id);
-    if (updatedAtt && getSupabaseConfig().isConfigured) {
-      await supabaseService.saveExamAttempt(updatedAtt);
+    if (updatedAtt && isCloudDbConfigured()) {
+      await tursoService.saveExamAttempt(updatedAtt);
     }
     try {
       const draftKey = `cbt_exam_progress_${targetAtt.studentId}_${targetAtt.examId}`;
@@ -193,7 +193,7 @@ export default function GuruPanel({
   const [evaluatingAttemptId, setEvaluatingAttemptId] = useState<string | null>(null);
   const [evaluatingScores, setEvaluatingScores] = useState<Record<string, number>>({});
   const [successMessage, setSuccessMessage] = useState('');
-  const isSupabaseActive = getSupabaseConfig().isConfigured;
+  const isTursoActive = isCloudDbConfigured();
   const teacherSubjects = subjects.filter(s => s.teacherName === currentUser.name);
   const availableClasses = Array.from(new Set(students.filter(u => u.classGrade).map(u => u.classGrade as string))).sort();
   if (availableClasses.length === 0) availableClasses.push('7A', '7B', '7C', '8A', '8B', '8C', '9A', '9B', '9C');
@@ -689,8 +689,8 @@ export default function GuruPanel({
       // Hapus data sesi ujian ini sehingga nama siswa hilang dari Riwayat Ujian dan siswa dapat mengulang dari awal
       const updated = allAttempts.filter((att) => att.id !== attemptId);
       onUpdateAttempts(updated);
-      if (getSupabaseConfig().isConfigured) {
-        supabaseService.deleteExamAttempt(attemptId);
+      if (isCloudDbConfigured()) {
+        tursoService.deleteExamAttempt(attemptId);
       }
       if (targetAtt) {
         try {
@@ -716,8 +716,8 @@ export default function GuruPanel({
         return att;
       });
       const updatedAtt = updated.find((a) => a.id === attemptId);
-      if (updatedAtt && getSupabaseConfig().isConfigured) {
-        supabaseService.saveExamAttempt(updatedAtt);
+      if (updatedAtt && isCloudDbConfigured()) {
+        tursoService.saveExamAttempt(updatedAtt);
       }
       if (targetAtt) {
         try {
@@ -1327,10 +1327,10 @@ export default function GuruPanel({
               onClick={handleManualSyncNow}
               disabled={isRefreshing}
               className="px-3 py-2 bg-emerald-50 hover:bg-emerald-100 text-emerald-800 rounded-xl border border-emerald-200 text-xs font-bold transition flex items-center gap-1.5 cursor-pointer shadow-2xs active:scale-95 disabled:opacity-50"
-              title="Perbarui data ujian dan status siswa dari database Supabase sekarang"
+              title="Perbarui data ujian dan status siswa dari database Turso sekarang"
             >
               <RefreshCw className={`w-3.5 h-3.5 text-emerald-600 ${isRefreshing ? 'animate-spin' : ''}`} />
-              <span className="hidden sm:inline">{isRefreshing ? 'Menyinkronkan...' : 'Sinkron Database'}</span>
+              <span className="hidden sm:inline">{isRefreshing ? 'Menyinkronkan...' : 'Sinkron Database Turso'}</span>
             </button>
 
             {/* Profil Guru */}
@@ -2890,7 +2890,7 @@ export default function GuruPanel({
                 onClick={handleManualSyncNow}
                 disabled={isRefreshing}
                 className="px-3.5 py-2 bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl text-xs font-bold flex items-center gap-1.5 transition cursor-pointer shadow-xs active:scale-95 disabled:opacity-50"
-                title="Sinkronkan data siswa dan hasil ujian dari database Supabase sekarang"
+                title="Sinkronkan data siswa dan hasil ujian dari database Turso sekarang"
               >
                 <RefreshCw className={`w-3.5 h-3.5 ${isRefreshing ? 'animate-spin' : ''}`} />
                 <span>{isRefreshing ? 'Menyinkronkan...' : 'Sinkronkan Sekarang'}</span>

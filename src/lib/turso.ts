@@ -77,15 +77,44 @@ export const clearTursoAuthError = () => {
   tursoAuthErrorState = null;
 };
 
+export const syncTursoConfigWithServer = async (): Promise<TursoConfig> => {
+  try {
+    const res = await fetch('/api/turso/config');
+    if (res.ok) {
+      const serverConfig = await res.json();
+      if (serverConfig.isConfigured && serverConfig.url && serverConfig.authToken) {
+        localStorage.setItem('cbt_turso_url', serverConfig.url);
+        localStorage.setItem('cbt_turso_token', serverConfig.authToken);
+        localStorage.setItem('cbt_active_db_provider', 'turso');
+        tursoInstance = null;
+        clearTursoAuthError();
+        return getTursoConfig();
+      }
+    }
+  } catch (err) {
+    console.warn('Gagal menyinkronkan konfigurasi Turso dari server:', err);
+  }
+  return getTursoConfig();
+};
+
 export const saveTursoConfig = (rawUrl: string, rawToken: string) => {
   const { url } = sanitizeTursoUrl(rawUrl);
   const cleanToken = sanitizeTursoToken(rawToken);
-  localStorage.setItem('cbt_turso_url', url || rawUrl.trim());
+  const finalUrl = url || rawUrl.trim();
+
+  localStorage.setItem('cbt_turso_url', finalUrl);
   localStorage.setItem('cbt_turso_token', cleanToken);
   // Auto set active db provider to Turso
   localStorage.setItem('cbt_active_db_provider', 'turso');
   tursoInstance = null;
   clearTursoAuthError();
+
+  // Sinkronkan ke server agar browser lain otomatis terkoneksi ke database yang sama!
+  fetch('/api/turso/config', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ url: finalUrl, authToken: cleanToken }),
+  }).catch((err) => console.warn('Gagal menyimpan config Turso ke server:', err));
 };
 
 export const clearTursoConfig = () => {
@@ -93,18 +122,18 @@ export const clearTursoConfig = () => {
   localStorage.removeItem('cbt_turso_token');
   tursoInstance = null;
   clearTursoAuthError();
+
+  fetch('/api/turso/config', { method: 'DELETE' }).catch(() => {});
 };
 
-export type DatabaseProvider = 'turso' | 'supabase' | 'local';
+export type DatabaseProvider = 'turso' | 'local';
 
 export const getActiveDbProvider = (): DatabaseProvider => {
   const stored = localStorage.getItem('cbt_active_db_provider') as DatabaseProvider | null;
-  if (stored === 'turso' || stored === 'supabase' || stored === 'local') {
+  if (stored === 'turso' || stored === 'local') {
     return stored;
   }
-  // Default to Turso if configured, then Supabase, then Local
-  if (getTursoConfig().isConfigured) return 'turso';
-  return 'supabase';
+  return 'turso';
 };
 
 export const setActiveDbProvider = (provider: DatabaseProvider) => {
@@ -174,16 +203,12 @@ export const testTursoConnection = async (
     });
     if (res.ok) {
       const data = await res.json();
-      return data;
-    } else {
-      const errData = await res.json().catch(() => ({}));
-      if (errData.message) {
-        return {
-          success: false,
-          message: errData.message,
-          tablesFound: [],
-        };
+      if (data.success) {
+        clearTursoAuthError();
+      } else if (data.isAuthError || String(data.message || '').includes('401')) {
+        setTursoAuthError(data.message);
       }
+      return data;
     }
   } catch (proxyErr) {
     console.warn('Server proxy test failed, trying client-side test:', proxyErr);
@@ -206,6 +231,7 @@ export const testTursoConnection = async (
     );
 
     const tablesFound = res.rows.map((r: any) => String(r.name || r[0]));
+    clearTursoAuthError();
 
     if (tablesFound.length === 0) {
       return {
@@ -223,10 +249,12 @@ export const testTursoConnection = async (
       normalizedUrl: url,
     };
   } catch (err: any) {
-    console.error('Turso connection error:', err);
+    console.warn('Turso direct connection test result:', err);
     let msg = err?.message || String(err);
-    if (msg.includes('401') || msg.includes('Unauthorized') || msg.includes('JWT')) {
-      msg = 'Autentikasi ditolak (401 Unauthorized). Pastikan Auth Token valid dan belum kadaluarsa.';
+    const is401 = msg.includes('401') || msg.includes('Unauthorized') || msg.includes('JWT') || String(err?.cause || '').includes('401');
+    if (is401) {
+      msg = 'Autentikasi ditolak (HTTP status 401 Unauthorized). Pastikan Auth Token valid dan belum kadaluarsa. Buat token baru di tab Tokens dashboard Turso.';
+      setTursoAuthError(msg);
     } else if (msg.includes('Failed to fetch') || msg.includes('NetworkError')) {
       msg = 'Koneksi jaringan ke Turso gagal atau diblokir browser. Pastikan URL diawali dengan libsql:// atau https:// dan koneksi internet stabil.';
     }
@@ -359,10 +387,14 @@ export const initTursoSchema = async (customClient?: Client): Promise<{ success:
       message: 'Skema tabel database Turso berhasil dibuat dan siap digunakan!',
     };
   } catch (err: any) {
-    console.error('Error initializing Turso schema:', err);
+    console.warn('Error initializing Turso schema:', err);
+    const msg = err?.message || String(err);
+    if (msg.includes('401') || String(err?.cause || '').includes('401')) {
+      setTursoAuthError('Autentikasi ditolak (HTTP status 401 Unauthorized) saat inisialisasi tabel di Turso.');
+    }
     return {
       success: false,
-      message: `Gagal inisialisasi tabel di Turso: ${err?.message || err}`,
+      message: `Gagal inisialisasi tabel di Turso: ${msg}`,
     };
   }
 };

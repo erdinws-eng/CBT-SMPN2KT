@@ -40,7 +40,8 @@ import {
   QuestionType,
 } from '../types';
 import { saveAttempts } from '../lib/storage';
-import { supabaseService } from '../services/supabaseService';
+import { tursoService } from '../services/tursoService';
+import { isCloudDbConfigured } from '../services/unifiedDbService';
 
 interface SiswaPanelProps {
   currentUser: User;
@@ -133,7 +134,7 @@ export default function SiswaPanel({
     saveActiveProgressToLocal({ currentQuestionIndex: newIndex });
   };
 
-  // Sinkronisasi otomatis data ujian dari database Supabase ke localStorage browser HP siswa saat guru mengklik Lanjutkan
+  // Sinkronisasi otomatis data ujian dari database Turso ke localStorage browser HP siswa saat guru mengklik Lanjutkan
   useEffect(() => {
     if (activeExam) return; // Jangan timpa jika siswa sedang di dalam ruang ujian aktif
 
@@ -376,7 +377,7 @@ export default function SiswaPanel({
     };
     localStorage.setItem(localKey, JSON.stringify(updatedProgress));
 
-    // CATATAN: Tidak mengirim attempt in_progress ke Supabase / App attempts agar tidak muncul di riwayat guru saat belum selesai
+    // CATATAN: Tidak mengirim attempt in_progress ke Turso / App attempts agar tidak muncul di riwayat guru saat belum selesai
     setActiveExam({ ...exam, questions: questionsOrder });
     setCurrentAttempt(inMemoryAttempt);
     setUserAnswers(resumedAnswers);
@@ -598,7 +599,7 @@ export default function SiswaPanel({
     await handleFinishExam(false);
   };
 
-  // Calculate Score, Save to Supabase & localStorage without artificial delays, and Finalize
+  // Calculate Score, Save to Turso & localStorage without artificial delays, and Finalize
   const handleFinishExam = async (isDisqualified = false, violationReason = '') => {
     if (!activeExam || !currentAttempt) return;
 
@@ -773,7 +774,7 @@ export default function SiswaPanel({
 
     // 2b. Simpan ke antrean sinkronisasi pending SECARA SINKRON SEBELUM MENCOBA JARINGAN!
     // Ini menjamin 100%: jika browser di-refresh, ditutup, atau wifi lambat seketika saat submit/pelanggaran,
-    // data attempt SUDAH TERSIMPAN di storage lokal dan otomatis di-flush ke Supabase saat reload atau online!
+    // data attempt SUDAH TERSIMPAN di storage lokal dan otomatis di-flush ke Turso saat reload atau online!
     try {
       localStorage.setItem(
         `cbt_pending_attempt_${finalAttempt.id}`,
@@ -806,7 +807,7 @@ export default function SiswaPanel({
       isSubmittingRef.current = false;
     }, 2500);
 
-    // 4. Sinkronisasi ke Supabase database dijalankan di latar belakang (Background Sync dengan Auto-Retry & Jitter)
+    // 4. Sinkronisasi ke Turso database dijalankan di latar belakang (Background Sync dengan Auto-Retry & Jitter)
     // Hal ini menjamin 100-300 browser siswa dapat submit bersamaan tanpa overload atau saling mengunci
     (async () => {
       try {
@@ -814,11 +815,11 @@ export default function SiswaPanel({
         const jitter = Math.floor(Math.random() * 1000);
         await new Promise((res) => setTimeout(res, jitter));
 
-        let success = await supabaseService.saveExamAttempt(finalAttempt);
+        let success = await tursoService.saveExamAttempt(finalAttempt);
         if (!success) {
           console.warn('Percobaan pertama simpan attempt tertunda, mencoba ulang di latar belakang...');
           await new Promise((res) => setTimeout(res, 1200));
-          success = await supabaseService.saveExamAttempt(finalAttempt);
+          success = await tursoService.saveExamAttempt(finalAttempt);
         }
 
         // Jika jaringan sedang gangguan/offline, simpan ke antrian offline lokal untuk auto-sync saat online
@@ -835,7 +836,7 @@ export default function SiswaPanel({
           } catch (e) {}
         }
 
-        // Bersihkan attempt in_progress lama dari Supabase jika ada ID berbeda
+        // Bersihkan attempt in_progress lama dari Turso jika ada ID berbeda
         const staleInProgress = attempts.filter(
           (a) =>
             a.examId === activeExam.id &&
@@ -844,10 +845,10 @@ export default function SiswaPanel({
             a.id !== finalAttempt.id
         );
         for (const stale of staleInProgress) {
-          await supabaseService.deleteExamAttempt(stale.id);
+          await tursoService.deleteExamAttempt(stale.id);
         }
       } catch (err) {
-        console.warn('Latar belakang: Gagal menyimpan attempt ke Supabase:', err);
+        console.warn('Latar belakang: Gagal menyimpan attempt ke Turso:', err);
         try {
           localStorage.setItem(
             `cbt_pending_attempt_${finalAttempt.id}`,

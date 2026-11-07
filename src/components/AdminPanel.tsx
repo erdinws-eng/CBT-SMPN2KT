@@ -38,8 +38,8 @@ import {
   AlertTriangle,
 } from 'lucide-react';
 import { User, Subject, SchoolSettings } from '../types';
-import { getSupabaseConfig } from '../lib/supabase';
 import { getTursoConfig, getActiveDbProvider } from '../lib/turso';
+import { isCloudDbConfigured } from '../services/unifiedDbService';
 import { saveStoredSettings } from '../lib/storage';
 import {
   exportSiswaToExcel,
@@ -62,7 +62,6 @@ interface AdminPanelProps {
   onUpdateCurrentUser?: (user: User) => void;
   onUpdateSubjects: (subjects: Subject[]) => void;
   onUpdateSettings: (settings: SchoolSettings) => void | Promise<void>;
-  onOpenSupabaseModal?: () => void;
   onOpenTursoModal?: () => void;
   onLogout?: () => void;
 }
@@ -76,7 +75,6 @@ export default function AdminPanel({
   onUpdateCurrentUser,
   onUpdateSubjects,
   onUpdateSettings,
-  onOpenSupabaseModal,
   onOpenTursoModal,
   onLogout,
 }: AdminPanelProps) {
@@ -613,7 +611,7 @@ export default function AdminPanel({
       // 1. Simpan langsung secara sinkron ke localStorage agar tidak hilang saat browser di-refresh
       saveStoredSettings(localSettings);
       
-      // 2. Kirim ke handler App untuk update state dan sinkronisasi ke database Supabase
+      // 2. Kirim ke handler App untuk update state dan sinkronisasi ke database Turso
       if (onUpdateSettings) {
         await onUpdateSettings(localSettings);
       }
@@ -742,9 +740,7 @@ export default function AdminPanel({
     });
   };
 
-  const isSupabaseActive = getSupabaseConfig().isConfigured;
-  const isTursoActive = getTursoConfig().isConfigured;
-  const activeDbProvider = getActiveDbProvider();
+  const isTursoActive = isCloudDbConfigured();
 
   return (
     <div id="admin-panel-layout" className="min-h-screen bg-slate-100 flex relative text-slate-800">
@@ -940,16 +936,14 @@ export default function AdminPanel({
             </div>
           </div>
 
-          {/* Sisi Kanan: Status Turso / Supabase, Profil Administrator, & Logout */}
+          {/* Sisi Kanan: Status Turso Database, Profil Administrator, & Logout */}
           <div className="flex items-center gap-2.5">
             {onOpenTursoModal && (
               <button
                 onClick={onOpenTursoModal}
                 className={`hidden sm:flex items-center gap-1.5 px-3 py-1.5 rounded-xl border text-xs font-bold transition cursor-pointer ${
-                  activeDbProvider === 'turso' && isTursoActive
+                  isTursoActive
                     ? 'bg-teal-50 border-teal-300 text-teal-800 hover:bg-teal-100 shadow-2xs'
-                    : isTursoActive
-                    ? 'bg-slate-50 border-slate-200 text-slate-700 hover:bg-slate-100'
                     : 'bg-emerald-50/70 border-emerald-200 text-emerald-700 hover:bg-emerald-100'
                 }`}
                 title="Migrasi & Konfigurasi Turso Database (LibSQL)"
@@ -958,31 +952,9 @@ export default function AdminPanel({
                 <span className="hidden md:inline">Turso DB</span>
                 <span
                   className={`w-2 h-2 rounded-full ${
-                    activeDbProvider === 'turso' && isTursoActive
-                      ? 'bg-teal-500 animate-pulse'
-                      : isTursoActive
-                      ? 'bg-slate-400'
-                      : 'bg-emerald-400'
-                  }`}
-                />
-              </button>
-            )}
-
-            {onOpenSupabaseModal && (
-              <button
-                onClick={onOpenSupabaseModal}
-                className={`hidden md:flex items-center gap-1.5 px-3 py-1.5 rounded-xl border text-xs font-bold transition cursor-pointer ${
-                  activeDbProvider === 'supabase' && isSupabaseActive
-                    ? 'bg-indigo-50 border-indigo-300 text-indigo-700 hover:bg-indigo-100'
-                    : 'bg-slate-50 border-slate-200 text-slate-600 hover:bg-slate-100'
-                }`}
-                title="Konfigurasi Database Supabase"
-              >
-                <Database className="w-3.5 h-3.5 text-indigo-600" />
-                <span>Supabase</span>
-                <span
-                  className={`w-2 h-2 rounded-full ${
-                    activeDbProvider === 'supabase' && isSupabaseActive ? 'bg-indigo-500' : 'bg-slate-300'
+                    isTursoActive
+                      ? 'bg-emerald-500 animate-pulse'
+                      : 'bg-amber-400'
                   }`}
                 />
               </button>
@@ -1144,11 +1116,11 @@ export default function AdminPanel({
                   </button>
                 </div>
 
-                {/* Card Database Cloud: Turso (LibSQL) & Supabase */}
+                {/* Card Database Cloud: Turso (LibSQL SQLite) */}
                 <div className="bg-white p-5 rounded-2xl border border-slate-200 shadow-2xs hover:shadow-xs transition flex flex-col justify-between">
                   <div className="flex items-center justify-between">
                     <span className="text-xs font-bold text-slate-500 uppercase tracking-wider">
-                      Database Cloud
+                      Database Terpusat
                     </span>
                     <div className="w-10 h-10 rounded-xl bg-teal-50 text-teal-700 flex items-center justify-center font-bold">
                       <Database className="w-5 h-5" />
@@ -1158,28 +1130,19 @@ export default function AdminPanel({
                     <div className="flex items-center gap-2">
                       <span
                         className={`w-2.5 h-2.5 rounded-full ${
-                          (activeDbProvider === 'turso' && isTursoActive) ||
-                          (activeDbProvider === 'supabase' && isSupabaseActive)
+                          isTursoActive
                             ? 'bg-emerald-500 animate-pulse'
                             : 'bg-amber-500'
                         }`}
                       />
                       <span className="text-base font-extrabold text-slate-900 truncate">
-                        {activeDbProvider === 'turso' && isTursoActive
-                          ? 'Turso Database'
-                          : activeDbProvider === 'supabase' && isSupabaseActive
-                          ? 'Supabase Cloud'
-                          : isTursoActive
-                          ? 'Turso Siap'
-                          : 'Lokal (Offline)'}
+                        {isTursoActive ? 'Turso Database' : 'Penyimpanan Lokal'}
                       </span>
                     </div>
                     <span className="text-[11px] text-slate-500 block mt-0.5">
-                      {activeDbProvider === 'turso' && isTursoActive
-                        ? 'LibSQL Edge SQLite Aktif'
-                        : activeDbProvider === 'supabase' && isSupabaseActive
-                        ? 'PostgreSQL Supabase Aktif'
-                        : 'Penyimpanan lokal browser'}
+                      {isTursoActive
+                        ? 'Tersinkron Otomatis Antar Perangkat'
+                        : 'Belum terhubung ke Turso'}
                     </span>
                   </div>
 
@@ -1189,16 +1152,7 @@ export default function AdminPanel({
                         onClick={onOpenTursoModal}
                         className="flex items-center justify-between text-teal-700 hover:text-teal-800 hover:underline cursor-pointer"
                       >
-                        <span>Migrasi / Setup Turso</span>
-                        <ArrowRight className="w-3.5 h-3.5" />
-                      </button>
-                    )}
-                    {onOpenSupabaseModal && (
-                      <button
-                        onClick={onOpenSupabaseModal}
-                        className="flex items-center justify-between text-slate-500 hover:text-indigo-600 cursor-pointer"
-                      >
-                        <span>Konfigurasi Supabase</span>
+                        <span>{isTursoActive ? 'Kelola Turso DB' : 'Setup / Hubungkan Turso'}</span>
                         <ArrowRight className="w-3.5 h-3.5" />
                       </button>
                     )}
@@ -1626,39 +1580,39 @@ export default function AdminPanel({
       {/* ========================================================= */}
       {activeTab === 'settings' && (
         <div className="space-y-6 max-w-4xl">
-          {/* Supabase Database Connection Card */}
-          <div className="bg-gradient-to-br from-slate-900 to-indigo-950 rounded-2xl p-6 text-white shadow-md border border-slate-800 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
+          {/* Turso Database Connection Card */}
+          <div className="bg-gradient-to-br from-slate-900 to-teal-950 rounded-2xl p-6 text-white shadow-md border border-slate-800 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
             <div className="flex items-start gap-3.5">
-              <div className="w-12 h-12 rounded-2xl bg-white/10 flex items-center justify-center text-emerald-400 shrink-0 border border-white/10">
+              <div className="w-12 h-12 rounded-2xl bg-white/10 flex items-center justify-center text-teal-400 shrink-0 border border-white/10">
                 <Database className="w-6 h-6" />
               </div>
               <div>
                 <div className="flex items-center gap-2">
-                  <h3 className="font-extrabold text-base text-white">Database Cloud Supabase (PostgreSQL)</h3>
+                  <h3 className="font-extrabold text-base text-white">Database Terpusat Turso (LibSQL SQLite)</h3>
                   <span
                     className={`text-[10px] font-bold px-2 py-0.5 rounded-full uppercase tracking-wider ${
-                      getSupabaseConfig().isConfigured
+                      isTursoActive
                         ? 'bg-emerald-500/20 text-emerald-300 border border-emerald-500/30'
                         : 'bg-amber-500/20 text-amber-300 border border-amber-500/30'
                     }`}
                   >
-                    {getSupabaseConfig().isConfigured ? 'Aktif Terhubung' : 'Belum Terhubung'}
+                    {isTursoActive ? 'Aktif Terhubung' : 'Belum Terhubung'}
                   </span>
                 </div>
                 <p className="text-xs text-slate-300 mt-1 leading-relaxed">
-                  Menyimpan bank soal asesmen, master data kurikulum, serta rekap jawaban & nilai siswa secara terpusat di Supabase.
+                  Menyimpan bank soal asesmen, master data guru & siswa, serta rekap jawaban & nilai ujian secara real-time dan tersinkron di semua browser & perangkat.
                 </p>
               </div>
             </div>
 
-            {onOpenSupabaseModal && (
+            {onOpenTursoModal && (
               <button
                 type="button"
-                onClick={onOpenSupabaseModal}
-                className="px-4 py-2.5 bg-emerald-500 hover:bg-emerald-400 text-slate-950 rounded-xl font-bold text-xs flex items-center justify-center gap-2 shadow-sm transition cursor-pointer shrink-0"
+                onClick={onOpenTursoModal}
+                className="px-4 py-2.5 bg-teal-500 hover:bg-teal-400 text-slate-950 rounded-xl font-bold text-xs flex items-center justify-center gap-2 shadow-sm transition cursor-pointer shrink-0"
               >
                 <Database className="w-4 h-4 text-slate-950" />
-                <span>Konfigurasi Supabase</span>
+                <span>{isTursoActive ? 'Kelola Turso' : 'Setup Turso DB'}</span>
               </button>
             )}
           </div>
