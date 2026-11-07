@@ -31,15 +31,30 @@ export function sanitizeTursoToken(rawToken: string): string {
   return token;
 }
 
+// Konfigurasi Terpusat Database Turso Sekolah (Otomatis aktif untuk semua browser & pengguna)
+export const DEFAULT_TURSO_DATABASE_URL = 'libsql://cbt-erdinws.aws-ap-southeast-1.turso.io';
+export const DEFAULT_TURSO_AUTH_TOKEN = 'eyJhbGciOiJFZERTQSIsInR5cCI6IkpXVCJ9.eyJhIjoicnciLCJpYXQiOjE3OTQwMjM2OTEsImlkIjoiMDFhMThmZmMtNDEwMS03MjBmLTgxNDYtNzFmZjk3NzliODVkIiwia2lkIjoib29xaWQ4RmpBcGw4VklxcUlwWk94cC1MS0RNQzdYZUpkRWtQUDZoZ0dKSSIsInJpZCI6IjJlZTE3NDc0LTU1OWEtNGU4Ny1hMGMwLTEwNzUyMzhhMjdiMCJ9.a94oc3ScY6gn76pK_YunSGZZIpkNUiSQoOD0R0C8ezrtmhtZjWkvcEMYgwPciWNonpjg3jDZPA_F9T-vIUEkAQ';
+
 export const getTursoConfig = (): TursoConfig => {
   const envUrl = (import.meta.env.VITE_TURSO_DATABASE_URL || '').trim();
   const envToken = (import.meta.env.VITE_TURSO_AUTH_TOKEN || '').trim();
 
-  const localUrl = (localStorage.getItem('cbt_turso_url') || '').trim();
-  const localToken = (localStorage.getItem('cbt_turso_token') || '').trim();
+  let localUrl = (localStorage.getItem('cbt_turso_url') || '').trim();
+  let localToken = (localStorage.getItem('cbt_turso_token') || '').trim();
 
-  const rawUrl = localUrl || envUrl;
-  const rawToken = localToken || envToken;
+  // Jika browser baru pertama kali dibuka atau token belum ada, otomatis pasang konfigurasi default
+  if (!localUrl || !localToken) {
+    localUrl = DEFAULT_TURSO_DATABASE_URL;
+    localToken = DEFAULT_TURSO_AUTH_TOKEN;
+    try {
+      localStorage.setItem('cbt_turso_url', DEFAULT_TURSO_DATABASE_URL);
+      localStorage.setItem('cbt_turso_token', DEFAULT_TURSO_AUTH_TOKEN);
+      localStorage.setItem('cbt_active_db_provider', 'turso');
+    } catch (e) {}
+  }
+
+  const rawUrl = localUrl || envUrl || DEFAULT_TURSO_DATABASE_URL;
+  const rawToken = localToken || envToken || DEFAULT_TURSO_AUTH_TOKEN;
 
   const { url } = sanitizeTursoUrl(rawUrl);
   const authToken = sanitizeTursoToken(rawToken);

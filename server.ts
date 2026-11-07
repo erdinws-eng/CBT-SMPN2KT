@@ -288,6 +288,9 @@ function normalizeTursoToken(rawToken: string): string {
   return token;
 }
 
+const DEFAULT_TURSO_DATABASE_URL = "libsql://cbt-erdinws.aws-ap-southeast-1.turso.io";
+const DEFAULT_TURSO_AUTH_TOKEN = "eyJhbGciOiJFZERTQSIsInR5cCI6IkpXVCJ9.eyJhIjoicnciLCJpYXQiOjE3OTQwMjM2OTEsImlkIjoiMDFhMThmZmMtNDEwMS03MjBmLTgxNDYtNzFmZjk3NzliODVkIiwia2lkIjoib29xaWQ4RmpBcGw4VklxcUlwWk94cC1MS0RNQzdYZUpkRWtQUDZoZ0dKSSIsInJpZCI6IjJlZTE3NDc0LTU1OWEtNGU4Ny1hMGMwLTEwNzUyMzhhMjdiMCJ9.a94oc3ScY6gn76pK_YunSGZZIpkNUiSQoOD0R0C8ezrtmhtZjWkvcEMYgwPciWNonpjg3jDZPA_F9T-vIUEkAQ";
+
 const TURSO_CONFIG_FILE = path.join(process.cwd(), "turso-config.json");
 
 function getStoredTursoConfig(): { url: string; authToken: string; isConfigured: boolean } {
@@ -316,7 +319,12 @@ function getStoredTursoConfig(): { url: string; authToken: string; isConfigured:
     };
   }
 
-  return { url: "", authToken: "", isConfigured: false };
+  // Default otomatis database sekolah terpusat (agar semua browser langsung terhubung tanpa setting)
+  return {
+    url: DEFAULT_TURSO_DATABASE_URL,
+    authToken: DEFAULT_TURSO_AUTH_TOKEN,
+    isConfigured: true,
+  };
 }
 
 function saveStoredTursoConfig(url: string, authToken: string): void {
