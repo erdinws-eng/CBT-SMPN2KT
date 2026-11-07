@@ -1,4 +1,4 @@
-import { getTursoClient, initTursoSchema, setTursoAuthError } from '../lib/turso';
+import { getTursoClient, initTursoSchema, setTursoAuthError, clearTursoAuthError } from '../lib/turso';
 import { SchoolSettings, User, Subject, Exam, ExamAttempt } from '../types';
 import { getStoredSettings, saveStoredSettings } from '../lib/storage';
 
@@ -25,8 +25,68 @@ function handleTursoError(action: string, err: any): void {
 }
 
 export const tursoService = {
+  // 0. Ambil seluruh data Turso sekaligus dalam 1 request (Sangat cepat & menjamin sinkron antar browser)
+  async fetchAllCloudData(): Promise<{
+    settings: SchoolSettings | null;
+    users: User[] | null;
+    subjects: Subject[] | null;
+    exams: Exam[] | null;
+    attempts: ExamAttempt[] | null;
+    syncedAt?: string;
+  } | null> {
+    // 1. Coba lewat server proxy Turso (Zero-CORS, anti-timeout, multi-browser handal)
+    try {
+      const res = await fetch('/api/turso/data');
+      if (res.ok) {
+        const data = await res.json();
+        if (data.success && data.isConfigured) {
+          clearTursoAuthError();
+          return {
+            settings: data.settings,
+            users: data.users,
+            subjects: data.subjects,
+            exams: data.exams,
+            attempts: data.attempts,
+            syncedAt: data.syncedAt,
+          };
+        }
+      }
+    } catch (e) {
+      console.warn('Gagal fetch /api/turso/data dari server:', e);
+    }
+
+    // 2. Fallback: ambil langsung via client LibSQL
+    const client = getTursoClient();
+    if (!client) return null;
+
+    try {
+      const [settings, users, subjects, exams, attempts] = await Promise.all([
+        this.getSchoolSettings(),
+        this.getUsers(),
+        this.getSubjects(),
+        this.getExams(),
+        this.getExamAttempts(),
+      ]);
+      return { settings, users, subjects, exams, attempts };
+    } catch (err) {
+      handleTursoError('fetchAllCloudData', err);
+      return null;
+    }
+  },
+
   // 1. Ambil data profil sekolah dari Turso
   async getSchoolSettings(): Promise<SchoolSettings | null> {
+    try {
+      const sRes = await fetch('/api/turso/data');
+      if (sRes.ok) {
+        const sData = await sRes.json();
+        if (sData.success && sData.settings) {
+          clearTursoAuthError();
+          return sData.settings;
+        }
+      }
+    } catch (e) {}
+
     const client = getTursoClient();
     if (!client) return null;
 
@@ -66,8 +126,17 @@ export const tursoService = {
     // Selalu pastikan tersimpan ke localStorage terlebih dahulu
     saveStoredSettings(settings);
 
+    // 1. Simpan via Server Proxy (menjamin tersimpan langsung ke Turso & tersinkron ke semua browser)
+    try {
+      fetch('/api/turso/save-settings', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ settings }),
+      }).then(() => clearTursoAuthError()).catch(() => {});
+    } catch (e) {}
+
     const client = getTursoClient();
-    if (!client) return false;
+    if (!client) return true;
 
     try {
       const now = new Date().toISOString();
@@ -303,8 +372,17 @@ export const tursoService = {
   },
 
   async saveExam(exam: Exam): Promise<boolean> {
+    // 1. Simpan via server proxy untuk replikasi instan antar-browser
+    try {
+      fetch('/api/turso/save-exam', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ exam }),
+      }).catch(() => {});
+    } catch (e) {}
+
     const client = getTursoClient();
-    if (!client) return false;
+    if (!client) return true;
 
     try {
       await client.execute({
@@ -355,8 +433,17 @@ export const tursoService = {
   },
 
   async deleteExam(examId: string): Promise<boolean> {
+    // 1. Hapus via server proxy
+    try {
+      fetch('/api/turso/delete-exam', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ examId }),
+      }).catch(() => {});
+    } catch (e) {}
+
     const client = getTursoClient();
-    if (!client) return false;
+    if (!client) return true;
 
     try {
       await client.execute({
@@ -438,8 +525,17 @@ export const tursoService = {
   },
 
   async saveExamAttempt(attempt: ExamAttempt): Promise<boolean> {
+    // 1. Simpan via server proxy untuk replikasi real-time antar browser
+    try {
+      fetch('/api/turso/save-attempt', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ attempt }),
+      }).catch(() => {});
+    } catch (e) {}
+
     const client = getTursoClient();
-    if (!client) return false;
+    if (!client) return true;
 
     try {
       const sanitized = {

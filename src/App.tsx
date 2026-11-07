@@ -18,8 +18,10 @@ import {
   getDeletedAttemptIds,
   addDeletedAttemptIds,
 } from './lib/storage';
+import { CheckCircle2, AlertCircle, RefreshCw } from 'lucide-react';
 import { syncTursoConfigWithServer } from './lib/turso';
 import { unifiedDbService, isCloudDbConfigured } from './services/unifiedDbService';
+import { tursoService } from './services/tursoService';
 import Navbar from './components/Navbar';
 import LoginView from './components/LoginView';
 import AdminPanel from './components/AdminPanel';
@@ -153,73 +155,99 @@ export default function App() {
     []
   );
 
-  // 1. Memuat SEMUA data (Settings, Users, Subjects, Exams, Attempts) dari Database Turso
-  const loadAllData = useCallback(async () => {
-    if (!isCloudDbConfigured()) return;
+  const [isSyncing, setIsSyncing] = useState<boolean>(false);
+  const [lastSyncedTime, setLastSyncedTime] = useState<string>('');
+  const [syncToast, setSyncToast] = useState<{ message: string; type: 'success' | 'error' } | null>(null);
 
+  // 1. Fungsi Utama Sinkronisasi Data dengan Turso Database
+  const handleManualSync = useCallback(async (silent = false): Promise<boolean> => {
+    setIsSyncing(true);
     try {
       isFetchingRef.current = true;
-      const [dbSettings, dbUsers, dbSubjects, dbExams, dbAttempts] = await Promise.all([
-        unifiedDbService.getSchoolSettings(),
-        unifiedDbService.getUsers(),
-        unifiedDbService.getSubjects(),
-        unifiedDbService.getExams(),
-        unifiedDbService.getExamAttempts(),
-      ]);
+      // Sinkronkan kredensial database Turso dari server
+      await syncTursoConfigWithServer();
 
-      if (dbSettings) {
-        const local = getStoredSettings();
-        const mergedSettings: SchoolSettings = {
-          ...local,
-          ...dbSettings,
-          appName: dbSettings.appName || local.appName || 'SMART CBT PRO',
-          schoolName: dbSettings.schoolName || local.schoolName,
-          dinasName: dbSettings.dinasName || local.dinasName || '',
-          kabupatenName: dbSettings.kabupatenName || local.kabupatenName || '',
-          signatureLocation: dbSettings.signatureLocation || local.signatureLocation || '',
-        };
-        setSettings(mergedSettings);
-        saveSettings(mergedSettings);
+      // Ambil seluruh snapshot data (settings, users, mapel, exams, attempts) dari Turso
+      const cloud = await tursoService.fetchAllCloudData();
+      if (cloud) {
+        if (cloud.settings) {
+          const local = getStoredSettings();
+          const mergedSettings: SchoolSettings = {
+            ...local,
+            ...cloud.settings,
+            appName: cloud.settings.appName || local.appName || 'SMART CBT PRO',
+            schoolName: cloud.settings.schoolName || local.schoolName,
+            schoolNpsn: cloud.settings.schoolNpsn ?? local.schoolNpsn ?? '',
+            schoolAddress: cloud.settings.schoolAddress ?? local.schoolAddress ?? '',
+            schoolCity: cloud.settings.schoolCity ?? local.schoolCity ?? '',
+            academicYear: cloud.settings.academicYear ?? local.academicYear ?? '2025/2026',
+            semester: cloud.settings.semester ?? local.semester ?? 'Genap',
+            principalName: cloud.settings.principalName ?? local.principalName ?? '',
+            principalNip: cloud.settings.principalNip ?? local.principalNip ?? '',
+            logoUrl: cloud.settings.logoUrl || local.logoUrl || '',
+            dinasName: cloud.settings.dinasName || local.dinasName || '',
+            kabupatenName: cloud.settings.kabupatenName || local.kabupatenName || '',
+            signatureLocation: cloud.settings.signatureLocation || local.signatureLocation || '',
+          };
+          setSettings(mergedSettings);
+          saveSettings(mergedSettings);
+        }
+        if (cloud.users && cloud.users.length > 0) {
+          setUsers(cloud.users);
+          saveUsers(cloud.users);
+        }
+        if (cloud.subjects && cloud.subjects.length > 0) {
+          setSubjects(cloud.subjects);
+          saveSubjects(cloud.subjects);
+        }
+        if (cloud.exams) {
+          const deletedIds = getDeletedExamIds();
+          const validExams = cloud.exams.filter(
+            (e) => !deletedIds.has(e.id) && !deletedExamIdsRef.current.has(e.id)
+          );
+          const sanitized = sanitizeExams(validExams);
+          setExams(sanitized);
+          saveExams(sanitized);
+        }
+        if (cloud.attempts) {
+          setAttempts((prev) => mergeAttemptsHelper(prev, cloud.attempts || []));
+        }
+        setIsDataLoaded(true);
+        const timeStr = new Date().toLocaleTimeString('id-ID', { hour: '2-digit', minute: '2-digit', second: '2-digit' });
+        setLastSyncedTime(timeStr);
+
+        if (!silent) {
+          setSyncToast({
+            type: 'success',
+            message: `Data aplikasi berhasil disinkronkan dengan Database Turso (${timeStr})!`,
+          });
+          setTimeout(() => setSyncToast(null), 3500);
+        }
+        return true;
       }
-      if (dbUsers && dbUsers.length > 0) {
-        setUsers(dbUsers);
-        saveUsers(dbUsers);
-      }
-      if (dbSubjects && dbSubjects.length > 0) {
-        setSubjects(dbSubjects);
-        saveSubjects(dbSubjects);
-      }
-      if (dbExams) {
-        const deletedIds = getDeletedExamIds();
-        dbExams.forEach((e) => {
-          if (deletedIds.has(e.id) || deletedExamIdsRef.current.has(e.id)) {
-            unifiedDbService.deleteExam(e.id);
-          }
+    } catch (err) {
+      console.warn('Gagal sinkron data dengan Turso database:', err);
+      if (!silent) {
+        setSyncToast({
+          type: 'error',
+          message: 'Gagal sinkron dengan database Turso. Periksa koneksi internet.',
         });
-        const validExams = dbExams.filter(
-          (e) => !deletedIds.has(e.id) && !deletedExamIdsRef.current.has(e.id)
-        );
-        const sanitized = sanitizeExams(validExams);
-        setExams(sanitized);
-        saveExams(sanitized);
+        setTimeout(() => setSyncToast(null), 4000);
       }
-      if (dbAttempts) {
-        setAttempts((prev) => mergeAttemptsHelper(prev, dbAttempts));
-      }
-      setIsDataLoaded(true);
+    } finally {
       setTimeout(() => {
         isFetchingRef.current = false;
-      }, 300);
-    } catch (err) {
-      console.warn('Gagal memuat seluruh data dari Turso database:', err);
-      isFetchingRef.current = false;
+        setIsSyncing(false);
+      }, 250);
     }
+    return false;
   }, [mergeAttemptsHelper]);
 
-  // 2. Memuat HANYA data Exam Attempts (Sangat ringan & cepat, < 50ms) - untuk polling monitor
+  const loadAllData = handleManualSync;
+
+  // 2. Memuat HANYA data Exam Attempts untuk monitoring cepat
   const loadAttempts = useCallback(async () => {
     if (!isCloudDbConfigured()) return;
-
     try {
       const dbAttempts = await unifiedDbService.getExamAttempts();
       if (dbAttempts) {
@@ -231,53 +259,36 @@ export default function App() {
   }, [mergeAttemptsHelper]);
 
   // Inisialisasi awal aplikasi:
-  // Ambil shared config Turso dari server terlebih dahulu agar semua browser otomatis tersambung!
+  // Ambil data Turso otomatis saat browser pertama kali dibuka
   useEffect(() => {
     (async () => {
       await syncTursoConfigWithServer();
-      if (isCloudDbConfigured()) {
-        await loadAllData();
-      }
+      await handleManualSync(true);
     })();
-  }, [loadAllData]);
+  }, [handleManualSync]);
 
-  // Polling pintar antar-browser agar seluruh data selalu sinkron:
-  // - Guru / Admin: Polling attempts setiap 3 detik, dan periksa ujian/mapel/users setiap 6 detik
-  // - Siswa: Polling berkala setiap 8 detik agar ujian baru langsung muncul
-  // - Window focus & visibilitychange: Seketika tab difokuskan, muat data terbaru dari Turso
+  // Polling pintar antar-browser agar seluruh data selalu sinkron di browser lain
   useEffect(() => {
-    if (!isCloudDbConfigured() || !currentUser) return;
-
-    let attemptsInterval: any = null;
-    let fullInterval: any = null;
-
-    if (currentUser.role === 'guru' || currentUser.role === 'admin') {
-      attemptsInterval = setInterval(() => {
-        loadAttempts();
-      }, 3000);
-
-      fullInterval = setInterval(() => {
-        loadAllData();
-      }, 7000);
-    } else if (currentUser.role === 'siswa') {
-      fullInterval = setInterval(() => {
-        loadAllData();
-      }, 8500);
-    }
+    // Polling berkala: setiap 4.5 detik saat login, atau 7 detik di layar login
+    const intervalMs = currentUser ? 4500 : 7000;
+    const syncInterval = setInterval(() => {
+      if (!isFetchingRef.current) {
+        handleManualSync(true);
+      }
+    }, intervalMs);
 
     const handleFocusOrVisible = () => {
-      if (!document.hidden) {
-        loadAllData();
+      if (!document.hidden && !isFetchingRef.current) {
+        handleManualSync(true);
       }
     };
 
     window.addEventListener('focus', handleFocusOrVisible);
     document.addEventListener('visibilitychange', handleFocusOrVisible);
 
-    // Dengar pesan dari tab lain di browser yang sama
     const handleBroadcast = (event: MessageEvent) => {
-      if (event.data?.type === 'CBT_DATA_MUTATED') {
-        loadAllData();
+      if (event.data?.type === 'CBT_DATA_MUTATED' && !isFetchingRef.current) {
+        handleManualSync(true);
       }
     };
     if (syncChannel) {
@@ -306,8 +317,7 @@ export default function App() {
     flushPendingAttempts();
 
     return () => {
-      if (attemptsInterval) clearInterval(attemptsInterval);
-      if (fullInterval) clearInterval(fullInterval);
+      clearInterval(syncInterval);
       window.removeEventListener('focus', handleFocusOrVisible);
       document.removeEventListener('visibilitychange', handleFocusOrVisible);
       window.removeEventListener('online', flushPendingAttempts);
@@ -315,7 +325,7 @@ export default function App() {
         syncChannel.removeEventListener('message', handleBroadcast);
       }
     };
-  }, [currentUser, loadAttempts, loadAllData]);
+  }, [currentUser, handleManualSync]);
 
   // Helper broadcast perubahan data ke tab lain
   const notifyMutation = useCallback(() => {
@@ -495,6 +505,14 @@ export default function App() {
   if (!currentUser) {
     return (
       <>
+        {syncToast && (
+          <div className={`fixed top-4 right-4 z-50 px-4 py-3 rounded-2xl shadow-xl border text-xs font-bold flex items-center gap-2.5 transition-all animate-in fade-in duration-200 ${
+            syncToast.type === 'success' ? 'bg-emerald-700 text-white border-emerald-600 shadow-emerald-900/20' : 'bg-rose-700 text-white border-rose-600 shadow-rose-900/20'
+          }`}>
+            {syncToast.type === 'success' ? <CheckCircle2 className="w-4 h-4 shrink-0 text-emerald-200" /> : <AlertCircle className="w-4 h-4 shrink-0 text-rose-200" />}
+            <span>{syncToast.message}</span>
+          </div>
+        )}
         <LoginView
           users={users}
           settings={settings}
@@ -502,6 +520,9 @@ export default function App() {
             setCurrentUser(user);
           }}
           onOpenTursoModal={() => setIsTursoModalOpen(true)}
+          onSyncDatabase={() => handleManualSync(false)}
+          isSyncing={isSyncing}
+          lastSyncedTime={lastSyncedTime}
         />
         <TursoConfigModal
           isOpen={isTursoModalOpen}
@@ -514,7 +535,7 @@ export default function App() {
             attempts,
           }}
           onMigrationSuccess={async () => {
-            await loadAllData();
+            await handleManualSync(false);
           }}
         />
       </>
@@ -525,6 +546,16 @@ export default function App() {
 
   return (
     <div className="min-h-screen bg-slate-50 flex flex-col justify-between text-slate-800">
+      {/* Floating Sync Notification Toast */}
+      {syncToast && (
+        <div className={`fixed top-4 right-4 z-50 px-4 py-3 rounded-2xl shadow-xl border text-xs font-bold flex items-center gap-2.5 transition-all animate-in fade-in duration-200 ${
+          syncToast.type === 'success' ? 'bg-emerald-700 text-white border-emerald-600 shadow-emerald-900/20' : 'bg-rose-700 text-white border-rose-600 shadow-rose-900/20'
+        }`}>
+          {syncToast.type === 'success' ? <CheckCircle2 className="w-4 h-4 shrink-0 text-emerald-200" /> : <AlertCircle className="w-4 h-4 shrink-0 text-rose-200" />}
+          <span>{syncToast.message}</span>
+        </div>
+      )}
+
       <div>
         {/* Universal CBT Navbar (Hanya untuk Siswa, Admin & Guru memiliki Topbar & Sidebar mandiri) */}
         {currentUser.role === 'siswa' && (
@@ -534,6 +565,9 @@ export default function App() {
             onRoleSwitch={handleRoleSwitch}
             onOpenTursoModal={() => setIsTursoModalOpen(true)}
             settings={settings}
+            onSyncDatabase={() => handleManualSync(false)}
+            isSyncing={isSyncing}
+            lastSyncedTime={lastSyncedTime}
           />
         )}
 
@@ -551,6 +585,9 @@ export default function App() {
               onUpdateSettings={handleUpdateSettings}
               onOpenTursoModal={() => setIsTursoModalOpen(true)}
               onLogout={handleLogout}
+              onSyncDatabase={() => handleManualSync(false)}
+              isSyncing={isSyncing}
+              lastSyncedTime={lastSyncedTime}
             />
           )}
 
@@ -566,7 +603,7 @@ export default function App() {
               onUpdateAttempts={handleUpdateAttempts}
               onOpenTursoModal={() => setIsTursoModalOpen(true)}
               onLogout={handleLogout}
-              onRefreshData={loadAttempts}
+              onRefreshData={() => handleManualSync(false)}
             />
           )}
 
@@ -577,7 +614,7 @@ export default function App() {
               attempts={attempts}
               settings={settings}
               onUpdateAttempts={handleUpdateAttempts}
-              onRefreshData={loadAllData}
+              onRefreshData={() => handleManualSync(false)}
             />
           )}
         </main>

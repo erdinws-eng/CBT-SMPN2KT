@@ -36,6 +36,7 @@ import {
   Save,
   Loader2,
   AlertTriangle,
+  RefreshCw,
 } from 'lucide-react';
 import { User, Subject, SchoolSettings } from '../types';
 import { getTursoConfig, getActiveDbProvider } from '../lib/turso';
@@ -64,6 +65,9 @@ interface AdminPanelProps {
   onUpdateSettings: (settings: SchoolSettings) => void | Promise<void>;
   onOpenTursoModal?: () => void;
   onLogout?: () => void;
+  onSyncDatabase?: () => Promise<boolean | void> | void;
+  isSyncing?: boolean;
+  lastSyncedTime?: string;
 }
 
 export default function AdminPanel({
@@ -77,6 +81,9 @@ export default function AdminPanel({
   onUpdateSettings,
   onOpenTursoModal,
   onLogout,
+  onSyncDatabase,
+  isSyncing = false,
+  lastSyncedTime,
 }: AdminPanelProps) {
   const [activeTab, setActiveTab] = useState<'dashboard' | 'siswa' | 'guru' | 'mapel' | 'settings'>('dashboard');
   const [isSidebarOpen, setIsSidebarOpen] = useState(true);
@@ -938,6 +945,20 @@ export default function AdminPanel({
 
           {/* Sisi Kanan: Status Turso Database, Profil Administrator, & Logout */}
           <div className="flex items-center gap-2.5">
+            {/* Tombol Sinkron Database Instan */}
+            {onSyncDatabase && (
+              <button
+                id="btn-admin-sync-db"
+                onClick={() => onSyncDatabase()}
+                disabled={isSyncing}
+                className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl border border-teal-200 bg-teal-50 text-teal-800 hover:bg-teal-100 text-xs font-bold transition cursor-pointer shadow-2xs active:scale-95 disabled:opacity-50"
+                title={lastSyncedTime ? `Sinkronkan data dengan database (Terakhir: ${lastSyncedTime})` : 'Sinkronkan data dengan database'}
+              >
+                <RefreshCw className={`w-3.5 h-3.5 text-teal-600 ${isSyncing ? 'animate-spin' : ''}`} />
+                <span className="hidden sm:inline">{isSyncing ? 'Menyinkronkan...' : 'Sinkron Data'}</span>
+              </button>
+            )}
+
             {onOpenTursoModal && (
               <button
                 onClick={onOpenTursoModal}
@@ -1602,19 +1623,41 @@ export default function AdminPanel({
                 <p className="text-xs text-slate-300 mt-1 leading-relaxed">
                   Menyimpan bank soal asesmen, master data guru & siswa, serta rekap jawaban & nilai ujian secara real-time dan tersinkron di semua browser & perangkat.
                 </p>
+                {lastSyncedTime && (
+                  <div className="mt-2 text-[11px] text-teal-300/90 flex items-center gap-1.5 font-medium">
+                    <span className="w-1.5 h-1.5 rounded-full bg-teal-400 animate-ping" />
+                    <span>Terakhir sinkron: {lastSyncedTime}</span>
+                  </div>
+                )}
               </div>
             </div>
 
-            {onOpenTursoModal && (
-              <button
-                type="button"
-                onClick={onOpenTursoModal}
-                className="px-4 py-2.5 bg-teal-500 hover:bg-teal-400 text-slate-950 rounded-xl font-bold text-xs flex items-center justify-center gap-2 shadow-sm transition cursor-pointer shrink-0"
-              >
-                <Database className="w-4 h-4 text-slate-950" />
-                <span>{isTursoActive ? 'Kelola Turso' : 'Setup Turso DB'}</span>
-              </button>
-            )}
+            <div className="flex flex-wrap items-center gap-2 shrink-0">
+              {onSyncDatabase && (
+                <button
+                  type="button"
+                  id="btn-settings-sync-db"
+                  onClick={() => onSyncDatabase()}
+                  disabled={isSyncing}
+                  className="px-4 py-2.5 bg-slate-800/80 hover:bg-slate-800 text-teal-300 border border-teal-500/30 hover:border-teal-400 rounded-xl font-bold text-xs flex items-center justify-center gap-2 shadow-sm transition cursor-pointer active:scale-95 disabled:opacity-50"
+                  title="Tarik & sinkronkan data terbaru dari server Turso ke browser ini"
+                >
+                  <RefreshCw className={`w-4 h-4 text-teal-400 ${isSyncing ? 'animate-spin' : ''}`} />
+                  <span>{isSyncing ? 'Menyinkronkan...' : 'Sinkron Sekarang'}</span>
+                </button>
+              )}
+
+              {onOpenTursoModal && (
+                <button
+                  type="button"
+                  onClick={onOpenTursoModal}
+                  className="px-4 py-2.5 bg-teal-500 hover:bg-teal-400 text-slate-950 rounded-xl font-bold text-xs flex items-center justify-center gap-2 shadow-sm transition cursor-pointer"
+                >
+                  <Database className="w-4 h-4 text-slate-950" />
+                  <span>{isTursoActive ? 'Kelola Turso' : 'Setup Turso DB'}</span>
+                </button>
+              )}
+            </div>
           </div>
 
           {/* ========================================================= */}

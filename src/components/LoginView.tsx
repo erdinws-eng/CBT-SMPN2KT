@@ -6,6 +6,8 @@ import {
   EyeOff,
   ArrowRight,
   GraduationCap,
+  RefreshCw,
+  Database,
 } from 'lucide-react';
 import { User, SchoolSettings } from '../types';
 
@@ -14,6 +16,9 @@ interface LoginViewProps {
   onLoginSuccess: (user: User) => void;
   settings: SchoolSettings;
   onOpenTursoModal?: () => void;
+  onSyncDatabase?: () => Promise<boolean | void>;
+  isSyncing?: boolean;
+  lastSyncedTime?: string;
 }
 
 export default function LoginView({
@@ -21,6 +26,9 @@ export default function LoginView({
   onLoginSuccess,
   settings,
   onOpenTursoModal,
+  onSyncDatabase,
+  isSyncing,
+  lastSyncedTime,
 }: LoginViewProps) {
   const [username, setUsername] = useState('');
   const [password, setPassword] = useState('');
@@ -98,6 +106,31 @@ export default function LoginView({
       <div className="absolute -top-40 -left-40 w-96 h-96 bg-indigo-600/20 rounded-full blur-3xl pointer-events-none" />
       <div className="absolute -bottom-40 -right-40 w-96 h-96 bg-emerald-600/15 rounded-full blur-3xl pointer-events-none" />
       <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-[550px] h-[550px] bg-blue-500/10 rounded-full blur-3xl pointer-events-none" />
+
+      {/* Top Header Controls (Sync & Database) */}
+      <div className="absolute top-4 right-4 z-20 flex items-center gap-2">
+        {onSyncDatabase && (
+          <button
+            onClick={() => onSyncDatabase()}
+            disabled={isSyncing}
+            className="px-3 py-1.5 bg-white/10 hover:bg-white/20 text-white rounded-xl text-xs font-semibold backdrop-blur-md border border-white/20 transition flex items-center gap-1.5 cursor-pointer disabled:opacity-60 shadow-xs"
+            title="Sinkronkan profil sekolah dan pengguna dengan Turso Database"
+          >
+            <RefreshCw className={`w-3.5 h-3.5 text-emerald-400 ${isSyncing ? 'animate-spin' : ''}`} />
+            <span className="hidden sm:inline">{isSyncing ? 'Menyinkronkan...' : 'Sinkron Data'}</span>
+          </button>
+        )}
+        {onOpenTursoModal && (
+          <button
+            onClick={onOpenTursoModal}
+            className="px-3 py-1.5 bg-teal-500/20 hover:bg-teal-500/30 text-teal-300 rounded-xl text-xs font-semibold backdrop-blur-md border border-teal-500/30 transition flex items-center gap-1.5 cursor-pointer"
+            title="Kelola Database Turso"
+          >
+            <Database className="w-3.5 h-3.5 text-teal-400" />
+            <span className="hidden sm:inline">Turso DB</span>
+          </button>
+        )}
+      </div>
 
       {/* Main Login Card - Centered, Clean, No Clutter */}
       <div className="w-full flex-1 flex items-center justify-center px-4 py-12 relative z-10">
@@ -207,17 +240,30 @@ export default function LoginView({
 
       {/* Footer Minimalis */}
       <footer className="w-full py-4 text-center text-[11px] text-slate-400 relative z-10">
-        © {new Date().getFullYear()} {settings.schoolName || 'SMP NEGERI 1 CERDAS MANDIRI'} • Sistem CBT
-        {onOpenTursoModal && (
-          <div className="mt-2 flex items-center justify-center gap-4 text-[11px]">
+        <div>
+          © {new Date().getFullYear()} {settings.schoolName || 'SMP NEGERI 1 CERDAS MANDIRI'} • Sistem CBT
+        </div>
+        <div className="mt-2 flex items-center justify-center gap-3 text-[11px]">
+          {onSyncDatabase && (
+            <button
+              onClick={() => onSyncDatabase()}
+              disabled={isSyncing}
+              className="text-emerald-400 hover:text-emerald-300 font-semibold transition cursor-pointer flex items-center gap-1"
+            >
+              <RefreshCw className={`w-3 h-3 ${isSyncing ? 'animate-spin' : ''}`} />
+              <span>{isSyncing ? 'Menyinkronkan...' : 'Sinkron Data Database'}</span>
+            </button>
+          )}
+          {onSyncDatabase && onOpenTursoModal && <span>•</span>}
+          {onOpenTursoModal && (
             <button 
               onClick={onOpenTursoModal}
               className="text-teal-400 hover:text-teal-300 font-semibold transition cursor-pointer"
             >
               Setup Database Turso
             </button>
-          </div>
-        )}
+          )}
+        </div>
       </footer>
     </div>
   );

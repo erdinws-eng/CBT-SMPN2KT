@@ -7,6 +7,7 @@ import {
   Sparkles,
   School,
   Database,
+  RefreshCw,
 } from 'lucide-react';
 import { User, UserRole, SchoolSettings } from '../types';
 import { getTursoConfig } from '../lib/turso';
@@ -21,6 +22,9 @@ interface NavbarProps {
   onOpenTursoModal?: () => void;
   settings: SchoolSettings;
   activeView?: 'admin' | 'guru' | 'siswa' | 'login';
+  onSyncDatabase?: () => Promise<boolean | void> | void;
+  isSyncing?: boolean;
+  lastSyncedTime?: string;
 }
 
 export default function Navbar({
@@ -31,6 +35,9 @@ export default function Navbar({
   onResetData,
   onOpenTursoModal,
   settings,
+  onSyncDatabase,
+  isSyncing = false,
+  lastSyncedTime,
 }: NavbarProps) {
   if (!currentUser) return null;
 
@@ -118,6 +125,20 @@ export default function Navbar({
                     isTursoActive ? 'bg-emerald-500 animate-pulse' : 'bg-amber-400'
                   }`}
                 />
+              </button>
+            )}
+
+            {/* Tombol Sinkron Database Instan */}
+            {onSyncDatabase && (
+              <button
+                id="btn-navbar-sync-db"
+                onClick={() => onSyncDatabase()}
+                disabled={isSyncing}
+                className="flex items-center gap-1.5 px-2.5 py-1 rounded-xl text-xs font-bold border border-teal-200 bg-teal-50 text-teal-800 hover:bg-teal-100 transition cursor-pointer shadow-2xs active:scale-95 disabled:opacity-50"
+                title={lastSyncedTime ? `Sinkronkan data dengan database (Terakhir: ${lastSyncedTime})` : 'Sinkronkan data sekarang'}
+              >
+                <RefreshCw className={`w-3.5 h-3.5 text-teal-600 ${isSyncing ? 'animate-spin' : ''}`} />
+                <span className="hidden md:inline">{isSyncing ? 'Menyinkronkan...' : 'Sinkron Data'}</span>
               </button>
             )}
 

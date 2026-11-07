@@ -743,6 +743,333 @@ app.post("/api/turso/migrate", async (req, res) => {
   }
 });
 
+// ==============================================================================
+// 4. UNIFIED TURSO REALTIME DATA SYNC ENDPOINTS (Cross-Browser Shared)
+// ==============================================================================
+function getServerTursoClient() {
+  const conf = getStoredTursoConfig();
+  if (!conf.isConfigured || !conf.url || !conf.authToken) return null;
+  return createLibsqlClient({ url: conf.url, authToken: conf.authToken });
+}
+
+// 4.1. Ambil seluruh data dari Turso Database untuk sinkronisasi instan antar-browser
+app.get("/api/turso/data", async (_req, res) => {
+  try {
+    const client = getServerTursoClient();
+    if (!client) {
+      return res.json({ success: false, isConfigured: false, message: "Turso belum dikonfigurasi di server." });
+    }
+
+    // Ambil semua tabel secara paralel
+    const [settingsRes, usersRes, subjectsRes, examsRes, attemptsRes] = await Promise.all([
+      client.execute("SELECT * FROM school_settings WHERE id = 'default_school' LIMIT 1").catch(() => ({ rows: [] })),
+      client.execute("SELECT * FROM users ORDER BY created_at ASC").catch(() => ({ rows: [] })),
+      client.execute("SELECT * FROM subjects ORDER BY code ASC").catch(() => ({ rows: [] })),
+      client.execute("SELECT * FROM exams ORDER BY created_at DESC").catch(() => ({ rows: [] })),
+      client.execute("SELECT * FROM exam_attempts ORDER BY started_at DESC").catch(() => ({ rows: [] })),
+    ]);
+
+    let settings = null;
+    if (settingsRes.rows && settingsRes.rows.length > 0) {
+      const s = settingsRes.rows[0] as any;
+      settings = {
+        appName: String(s.app_name || "SMART CBT PRO"),
+        schoolName: String(s.school_name || "SMP NEGERI 1 CERDAS MANDIRI"),
+        schoolNpsn: String(s.school_npsn || ""),
+        schoolAddress: String(s.school_address || ""),
+        schoolCity: String(s.school_city || ""),
+        academicYear: String(s.academic_year || "2025/2026"),
+        semester: s.semester || "Genap",
+        principalName: String(s.principal_name || ""),
+        principalNip: String(s.principal_nip || ""),
+        logoUrl: String(s.logo_url || ""),
+        dinasName: String(s.dinas_name || "PEMERINTAH KABUPATEN KOTABARU"),
+        kabupatenName: String(s.kabupaten_name || "DINAS PENDIDIKAN DAN KEBUDAYAAN"),
+        signatureLocation: String(s.signature_location || "Kotabaru"),
+      };
+    }
+
+    const users = (usersRes.rows || []).map((u: any) => {
+      let subjectNames: string[] = [];
+      try {
+        subjectNames = typeof u.subject_names === "string" ? JSON.parse(u.subject_names) : (u.subject_names || []);
+      } catch {}
+      return {
+        id: String(u.id),
+        username: String(u.username),
+        password: String(u.password || "123456"),
+        name: String(u.name),
+        role: u.role,
+        nip_nisn: String(u.nip_nisn || ""),
+        classGrade: String(u.class_grade || ""),
+        gender: u.gender || "L",
+        subjectName: String(u.subject_name || ""),
+        subjectNames,
+        avatarUrl: String(u.avatar_url || ""),
+      };
+    });
+
+    const subjects = (subjectsRes.rows || []).map((s: any) => ({
+      id: String(s.id),
+      code: String(s.code),
+      name: String(s.name),
+      gradeLevel: String(s.grade_level || "Semua Kelas"),
+      teacherName: String(s.teacher_name || ""),
+    }));
+
+    const exams = (examsRes.rows || []).map((e: any) => {
+      let targetClasses = [];
+      try {
+        targetClasses = typeof e.target_classes === "string" ? JSON.parse(e.target_classes) : (e.target_classes || []);
+      } catch {}
+      let questions = [];
+      try {
+        questions = typeof e.questions === "string" ? JSON.parse(e.questions) : (e.questions || []);
+      } catch {}
+      return {
+        id: String(e.id),
+        title: String(e.title),
+        subjectId: String(e.subject_id || ""),
+        subjectName: String(e.subject_name || "-"),
+        teacherId: String(e.teacher_id),
+        teacherName: String(e.teacher_name),
+        targetClasses,
+        startTime: String(e.start_time || ""),
+        endTime: String(e.end_time || ""),
+        durationMinutes: Number(e.duration_minutes || 60),
+        minSubmitMinutes: Number(e.min_submit_minutes || 15),
+        kkm: Number(e.kkm || 75),
+        allowRetake: Boolean(e.allow_retake),
+        maxRetakes: Number(e.max_retakes || 1),
+        releaseScore: Boolean(e.release_score),
+        randomizeQuestions: Boolean(e.randomize_questions),
+        randomizeOptions: Boolean(e.randomize_options),
+        lockdownBrowser: Boolean(e.lockdown_browser),
+        maxViolations: Number(e.max_violations || 3),
+        token: String(e.token || ""),
+        questions,
+        status: e.status || "active",
+        isActive: Boolean(e.is_active !== 0 && e.status !== "inactive"),
+        createdAt: String(e.created_at || new Date().toISOString()),
+      };
+    });
+
+    const attempts = (attemptsRes.rows || []).map((a: any) => {
+      let answers = {};
+      try { answers = typeof a.answers === "string" ? JSON.parse(a.answers) : (a.answers || {}); } catch {}
+      let doubtfulAnswers = {};
+      try { doubtfulAnswers = typeof a.doubtful_answers === "string" ? JSON.parse(a.doubtful_answers) : (a.doubtful_answers || {}); } catch {}
+      let scores = {};
+      try { scores = typeof a.scores === "string" ? JSON.parse(a.scores) : (a.scores || {}); } catch {}
+      let violationLogs = [];
+      try { violationLogs = typeof a.violation_logs === "string" ? JSON.parse(a.violation_logs) : (a.violation_logs || []); } catch {}
+
+      return {
+        id: String(a.id),
+        examId: String(a.exam_id),
+        examTitle: String(a.exam_title || "Ujian"),
+        subjectName: String(a.subject_name || "-"),
+        studentId: String(a.student_id),
+        studentName: String(a.student_name || "Siswa"),
+        studentNisn: String(a.student_nisn || ""),
+        studentClass: String(a.student_class || ""),
+        startedAt: String(a.started_at),
+        submittedAt: a.submitted_at ? String(a.submitted_at) : undefined,
+        answers,
+        doubtfulAnswers,
+        scores,
+        totalScore: Number(a.total_score || 0),
+        maxPossibleScore: Number(a.max_possible_score || 100),
+        totalEarnedPoints: Number(a.total_earned_points || 0),
+        totalMaxPoints: Number(a.total_max_points || 100),
+        scorePercentage: Number(a.score_percentage || 0),
+        passedKkm: Boolean(a.passed_kkm),
+        status: a.status || "in_progress",
+        violationCount: Number(a.violation_count || 0),
+        violationLogs,
+        teacherFeedback: String(a.teacher_feedback || ""),
+        isGraded: Boolean(a.is_graded),
+      };
+    });
+
+    return res.json({
+      success: true,
+      isConfigured: true,
+      settings,
+      users,
+      subjects,
+      exams,
+      attempts,
+      syncedAt: new Date().toISOString(),
+    });
+  } catch (err: any) {
+    console.warn("Gagal mengambil data Turso dari server:", err);
+    return res.json({ success: false, error: err?.message || String(err) });
+  }
+});
+
+// 4.2. Simpan Profil Sekolah ke Turso via Server (Langsung tersinkron ke semua browser)
+app.post("/api/turso/save-settings", async (req, res) => {
+  try {
+    const client = getServerTursoClient();
+    if (!client) return res.status(400).json({ success: false, message: "Turso belum dikonfigurasi di server." });
+
+    const { settings } = req.body;
+    if (!settings) return res.status(400).json({ success: false, message: "Data profil sekolah kosong." });
+
+    await client.execute({
+      sql: `INSERT OR REPLACE INTO school_settings (
+        id, app_name, school_name, school_npsn, school_address, school_city,
+        academic_year, semester, principal_name, principal_nip, logo_url,
+        dinas_name, kabupaten_name, signature_location, updated_at
+      ) VALUES ('default_school', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      args: [
+        settings.appName || "SMART CBT PRO",
+        settings.schoolName || "SMP NEGERI 1 CERDAS MANDIRI",
+        settings.schoolNpsn || "",
+        settings.schoolAddress || "",
+        settings.schoolCity || "",
+        settings.academicYear || "2025/2026",
+        settings.semester || "Genap",
+        settings.principalName || "",
+        settings.principalNip || "",
+        settings.logoUrl || "",
+        settings.dinasName || "PEMERINTAH KABUPATEN KOTABARU",
+        settings.kabupatenName || "DINAS PENDIDIKAN DAN KEBUDAYAAN",
+        settings.signatureLocation || "Kotabaru",
+        new Date().toISOString(),
+      ],
+    });
+
+    return res.json({ success: true, message: "Profil sekolah berhasil disimpan ke Turso Database." });
+  } catch (err: any) {
+    console.warn("Gagal simpan school_settings via server:", err);
+    return res.status(500).json({ success: false, message: err?.message || String(err) });
+  }
+});
+
+// 4.3. Simpan Paket Ujian ke Turso via Server
+app.post("/api/turso/save-exam", async (req, res) => {
+  try {
+    const client = getServerTursoClient();
+    if (!client) return res.status(400).json({ success: false, message: "Turso belum dikonfigurasi di server." });
+
+    const { exam } = req.body;
+    if (!exam || !exam.id) return res.status(400).json({ success: false, message: "Data ujian tidak valid." });
+
+    await client.execute({
+      sql: `INSERT OR REPLACE INTO exams (
+        id, title, subject_id, subject_name, teacher_id, teacher_name,
+        target_classes, start_time, end_time, duration_minutes, min_submit_minutes,
+        kkm, allow_retake, max_retakes, release_score, randomize_questions,
+        randomize_options, lockdown_browser, max_violations, token, questions,
+        status, is_active
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      args: [
+        exam.id,
+        exam.title,
+        exam.subjectId || "",
+        exam.subjectName,
+        exam.teacherId,
+        exam.teacherName,
+        JSON.stringify(exam.targetClasses || []),
+        exam.startTime || "",
+        exam.endTime || "",
+        exam.durationMinutes || 60,
+        exam.minSubmitMinutes || 15,
+        exam.kkm || 75,
+        exam.allowRetake ? 1 : 0,
+        exam.maxRetakes || 1,
+        exam.releaseScore ? 1 : 0,
+        exam.randomizeQuestions ? 1 : 0,
+        exam.randomizeOptions ? 1 : 0,
+        exam.lockdownBrowser ? 1 : 0,
+        exam.maxViolations || 3,
+        exam.token || "",
+        JSON.stringify(exam.questions || []),
+        exam.status || "active",
+        exam.isActive === false ? 0 : 1,
+      ],
+    });
+
+    return res.json({ success: true, message: "Ujian berhasil disimpan ke Turso." });
+  } catch (err: any) {
+    console.warn("Gagal simpan exam via server:", err);
+    return res.status(500).json({ success: false, message: err?.message || String(err) });
+  }
+});
+
+// 4.4. Hapus Paket Ujian dari Turso via Server
+app.post("/api/turso/delete-exam", async (req, res) => {
+  try {
+    const client = getServerTursoClient();
+    if (!client) return res.status(400).json({ success: false, message: "Turso belum dikonfigurasi di server." });
+
+    const { examId } = req.body;
+    if (!examId) return res.status(400).json({ success: false, message: "examId wajib diisi." });
+
+    await client.execute({ sql: `DELETE FROM exam_attempts WHERE exam_id = ?`, args: [examId] });
+    await client.execute({ sql: `DELETE FROM exams WHERE id = ?`, args: [examId] });
+
+    return res.json({ success: true, message: "Ujian berhasil dihapus dari Turso." });
+  } catch (err: any) {
+    console.warn("Gagal hapus exam via server:", err);
+    return res.status(500).json({ success: false, message: err?.message || String(err) });
+  }
+});
+
+// 4.5. Simpan Hasil Ujian Siswa (Attempt) ke Turso via Server
+app.post("/api/turso/save-attempt", async (req, res) => {
+  try {
+    const client = getServerTursoClient();
+    if (!client) return res.status(400).json({ success: false, message: "Turso belum dikonfigurasi di server." });
+
+    const { attempt } = req.body;
+    if (!attempt || !attempt.id) return res.status(400).json({ success: false, message: "Data attempt tidak valid." });
+
+    await client.execute({
+      sql: `INSERT OR REPLACE INTO exam_attempts (
+        id, exam_id, exam_title, subject_name, student_id, student_name,
+        student_nisn, student_class, started_at, submitted_at,
+        answers, doubtful_answers, scores, total_score, max_possible_score,
+        total_earned_points, total_max_points, score_percentage, passed_kkm,
+        status, violation_count, violation_logs, teacher_feedback, is_graded
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      args: [
+        attempt.id,
+        attempt.examId,
+        attempt.examTitle || "Ujian",
+        attempt.subjectName || "-",
+        attempt.studentId,
+        attempt.studentName,
+        attempt.studentNisn || "",
+        attempt.studentClass || "",
+        attempt.startedAt || new Date().toISOString(),
+        attempt.submittedAt || null,
+        JSON.stringify(attempt.answers || {}),
+        JSON.stringify(attempt.doubtfulAnswers || {}),
+        JSON.stringify(attempt.scores || {}),
+        Number(attempt.totalScore || 0),
+        Number(attempt.maxPossibleScore || 100),
+        Number(attempt.totalEarnedPoints || attempt.totalScore || 0),
+        Number(attempt.totalMaxPoints || attempt.maxPossibleScore || 100),
+        Number(attempt.scorePercentage || 0),
+        attempt.passedKkm ? 1 : 0,
+        attempt.status || "in_progress",
+        Number(attempt.violationCount || 0),
+        JSON.stringify(Array.isArray(attempt.violationLogs) ? attempt.violationLogs : []),
+        attempt.teacherFeedback || "",
+        attempt.isGraded ? 1 : 0,
+      ],
+    });
+
+    return res.json({ success: true, message: "Attempt berhasil disimpan ke Turso." });
+  } catch (err: any) {
+    console.warn("Gagal simpan attempt via server:", err);
+    return res.status(500).json({ success: false, message: err?.message || String(err) });
+  }
+});
+
 // Vite & Static Asset Handling
 async function start() {
   if (process.env.NODE_ENV !== "production") {
