@@ -52,6 +52,8 @@ export default function App() {
   const deletedExamIdsRef = useRef<Set<string>>(getDeletedExamIds());
 
   const isFetchingRef = useRef(false);
+  const pendingSavesCountRef = useRef(0);
+  const lastLocalMutationAtRef = useRef(0);
 
   // Helper untuk menggabungkan attempts server Turso dengan lokal secara konsisten & aman
   const mergeAttemptsHelper = useCallback(
@@ -161,6 +163,12 @@ export default function App() {
 
   // 1. Fungsi Utama Sinkronisasi Data dengan Turso Database
   const handleManualSync = useCallback(async (silent = false): Promise<boolean> => {
+    // Jangan timpa perubahan lokal yang sedang disimpan atau baru saja terjadi (misal: setelah tutup dialog file Excel)
+    if (silent && (pendingSavesCountRef.current > 0 || Date.now() - lastLocalMutationAtRef.current < 8000)) {
+      return false;
+    }
+
+    const mutationStampBeforeFetch = lastLocalMutationAtRef.current;
     setIsSyncing(true);
     try {
       isFetchingRef.current = true;
@@ -169,6 +177,12 @@ export default function App() {
 
       // Ambil seluruh snapshot data (settings, users, mapel, exams, attempts) dari Turso
       const cloud = await tursoService.fetchAllCloudData();
+
+      // Jika user melakukan mutasi lokal (impor soal, edit jadwal, dll) SAAT fetch berlangsung, jangan timpa state dengan snapshot lama!
+      if (lastLocalMutationAtRef.current !== mutationStampBeforeFetch || pendingSavesCountRef.current > 0) {
+        return false;
+      }
+
       if (cloud) {
         if (cloud.settings) {
           const local = getStoredSettings();
@@ -206,6 +220,7 @@ export default function App() {
             (e) => !deletedIds.has(e.id) && !deletedExamIdsRef.current.has(e.id)
           );
           const sanitized = sanitizeExams(validExams);
+          prevExamsRef.current = sanitized;
           setExams(sanitized);
           saveExams(sanitized);
         }
@@ -362,27 +377,11 @@ export default function App() {
     prevSubjectsRef.current = subjects;
   }, [subjects, isDataLoaded, currentUser, notifyMutation]);
 
-  // Sync perubahan data exams ke Turso secara langsung (Hanya Guru & Admin)
+  // Simpan exams ke localStorage & perbarui referensi (penulisan ke Turso ditangani langsung oleh handleUpdateExams)
   useEffect(() => {
     saveExams(exams);
-    if (currentUser?.role !== 'siswa' && isCloudDbConfigured() && isDataLoaded && !isFetchingRef.current) {
-      exams.forEach((item) => unifiedDbService.saveExam(item));
-      const currentIds = new Set(exams.map((item) => item.id));
-      const removedIds: string[] = [];
-      prevExamsRef.current.forEach((old) => {
-        if (!currentIds.has(old.id)) {
-          removedIds.push(old.id);
-          deletedExamIdsRef.current.add(old.id);
-          unifiedDbService.deleteExam(old.id);
-        }
-      });
-      if (removedIds.length > 0) {
-        addDeletedExamIds(removedIds);
-      }
-      notifyMutation();
-    }
     prevExamsRef.current = exams;
-  }, [exams, isDataLoaded, currentUser, notifyMutation]);
+  }, [exams]);
 
   useEffect(() => {
     saveAttempts(attempts);
@@ -437,20 +436,27 @@ export default function App() {
 
   // Handler simpan profil sekolah langsung ke database Turso
   const handleUpdateSettings = useCallback(async (newSettings: SchoolSettings) => {
+    lastLocalMutationAtRef.current = Date.now();
     setSettings(newSettings);
     saveSettings(newSettings);
     if (isCloudDbConfigured()) {
+      pendingSavesCountRef.current += 1;
       try {
         await unifiedDbService.saveSchoolSettings(newSettings);
       } catch (err) {
         console.warn('Gagal menyimpan profil sekolah ke Turso:', err);
+      } finally {
+        lastLocalMutationAtRef.current = Date.now();
+        pendingSavesCountRef.current = Math.max(0, pendingSavesCountRef.current - 1);
       }
     }
     notifyMutation();
   }, [notifyMutation]);
 
-  const handleUpdateExams = useCallback((newExams: Exam[]) => {
+  const handleUpdateExams = useCallback(async (newExams: Exam[]): Promise<boolean> => {
+    lastLocalMutationAtRef.current = Date.now();
     const sanitized = sanitizeExams(newExams);
+    const prevMap = new Map(prevExamsRef.current.map((e) => [e.id, e]));
     const newExamIds = new Set(sanitized.map((e) => e.id));
     const deletedExamIds: string[] = [];
 
@@ -461,11 +467,13 @@ export default function App() {
       }
     });
 
+    const changedExams = sanitized.filter((item) => {
+      const prev = prevMap.get(item.id);
+      return !prev || JSON.stringify(prev) !== JSON.stringify(item);
+    });
+
     if (deletedExamIds.length > 0) {
       addDeletedExamIds(deletedExamIds);
-      if (isCloudDbConfigured()) {
-        deletedExamIds.forEach((id) => unifiedDbService.deleteExam(id));
-      }
       deletedExamIds.forEach((id) => {
         try {
           const keys = Object.keys(localStorage);
@@ -483,9 +491,31 @@ export default function App() {
       });
     }
 
+    prevExamsRef.current = sanitized;
     setExams(sanitized);
     saveExams(sanitized);
     notifyMutation();
+
+    let allSaved = true;
+    if (isCloudDbConfigured() && (changedExams.length > 0 || deletedExamIds.length > 0)) {
+      pendingSavesCountRef.current += 1;
+      try {
+        const saveTasks: Promise<boolean>[] = [
+          ...changedExams.map((item) => unifiedDbService.saveExam(item)),
+          ...deletedExamIds.map((id) => unifiedDbService.deleteExam(id)),
+        ];
+        const results = await Promise.all(saveTasks);
+        allSaved = results.every(Boolean);
+      } catch (err) {
+        console.warn('Gagal menyimpan perubahan ujian ke Turso:', err);
+        allSaved = false;
+      } finally {
+        lastLocalMutationAtRef.current = Date.now();
+        pendingSavesCountRef.current = Math.max(0, pendingSavesCountRef.current - 1);
+      }
+    }
+
+    return allSaved;
   }, [notifyMutation]);
 
   const handleRoleSwitch = (newRole: UserRole) => {

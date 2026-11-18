@@ -307,41 +307,115 @@ export function downloadTemplateSoalExcel() {
 export async function parseSoalExcel(file: File): Promise<Question[]> {
   const buffer = await file.arrayBuffer();
   const wb = XLSX.read(buffer, { type: 'array' });
-  const ws = wb.Sheets[wb.SheetNames[0]];
-  const rows: any[] = XLSX.utils.sheet_to_json(ws);
 
-  return rows.map((r, i) => {
-    const rawType = String(r['Tipe Soal'] || 'pilihan_ganda').trim().toLowerCase();
+  let rows: any[] = [];
+  for (const sheetName of wb.SheetNames) {
+    const ws = wb.Sheets[sheetName];
+    if (!ws) continue;
+    const sheetRows: any[] = XLSX.utils.sheet_to_json(ws, { defval: '' });
+    if (sheetRows && sheetRows.length > 0) {
+      rows = sheetRows;
+      break;
+    }
+  }
+
+  const getField = (row: Record<string, any>, candidates: string[]): string => {
+    const entries = Object.entries(row);
+    for (const candidate of candidates) {
+      const target = candidate.trim().toLowerCase();
+      for (const [k, v] of entries) {
+        if (k.trim().toLowerCase() === target) {
+          return v !== undefined && v !== null ? String(v).trim() : '';
+        }
+      }
+    }
+    return '';
+  };
+
+  const validRows = rows.filter((r) => {
+    const promptVal = getField(r, ['Pertanyaan', 'Soal', 'Butir Soal', 'Question']);
+    const optA = getField(r, ['Pilihan A', 'Opsi A', 'A']);
+    const optB = getField(r, ['Pilihan B', 'Opsi B', 'B']);
+    return Boolean(promptVal || optA || optB);
+  });
+
+  const baseTs = Date.now();
+
+  return validRows.map((r, i) => {
+    const rawType = (getField(r, ['Tipe Soal', 'Tipe', 'Jenis Soal', 'Type']) || 'pilihan_ganda').toLowerCase();
     let type: QuestionType = 'pilihan_ganda';
-    if (rawType.includes('kompleks')) type = 'pilihan_ganda_kompleks';
+    if (rawType.includes('kompleks') || rawType === 'pgk') type = 'pilihan_ganda_kompleks';
     else if (rawType.includes('isi') || rawType.includes('singkat')) type = 'isian';
     else if (rawType.includes('essay') || rawType.includes('uraian')) type = 'essay';
     else if (rawType.includes('jodoh')) type = 'menjodohkan';
     else if (rawType.includes('benar') || rawType.includes('salah')) type = 'benar_salah';
 
     const options: string[] = [];
-    ['Pilihan A', 'Pilihan B', 'Pilihan C', 'Pilihan D', 'Pilihan E'].forEach((key, optIdx) => {
-      if (r[key]) {
+    const optionKeys: [string[], number][] = [
+      [['Pilihan A', 'Opsi A', 'Jawaban A', 'A'], 0],
+      [['Pilihan B', 'Opsi B', 'Jawaban B', 'B'], 1],
+      [['Pilihan C', 'Opsi C', 'Jawaban C', 'C'], 2],
+      [['Pilihan D', 'Opsi D', 'Jawaban D', 'D'], 3],
+      [['Pilihan E', 'Opsi E', 'Jawaban E', 'E'], 4],
+    ];
+    optionKeys.forEach(([keys, optIdx]) => {
+      const text = getField(r, keys);
+      if (text) {
         const letter = String.fromCharCode(65 + optIdx);
-        const text = String(r[key]).trim();
-        options.push(text.startsWith(letter + '.') ? text : `${letter}. ${text}`);
+        const alreadyPrefixed = new RegExp(`^${letter}[.)]\\s*`, 'i').test(text);
+        options.push(alreadyPrefixed ? text.replace(new RegExp(`^${letter}[.)]\\s*`, 'i'), `${letter}. `) : `${letter}. ${text}`);
       }
     });
 
-    const mediaType = (['image', 'video'].includes(String(r['Tipe Media (image/video/none)'] || '').toLowerCase())
-      ? String(r['Tipe Media (image/video/none)']).toLowerCase()
-      : 'none') as 'image' | 'video' | 'none';
+    const rawMediaType = getField(r, ['Tipe Media (image/video/none)', 'Tipe Media', 'Media Type']).toLowerCase();
+    const mediaType = (rawMediaType === 'image' || rawMediaType === 'video' ? rawMediaType : 'none') as 'image' | 'video' | 'none';
+    const mediaUrl = getField(r, ['URL Media', 'Media URL', 'Link Media']) || undefined;
+    const rawKey = getField(r, ['Kunci Jawaban', 'Kunci', 'Jawaban Benar', 'Answer']);
+    const rawExplanation = getField(r, ['Penjelasan', 'Pembahasan', 'Rubrik', 'Explanation']) || undefined;
+    const rawPoints = Number(getField(r, ['Bobot Nilai', 'Bobot', 'Skor', 'Poin', 'Points']));
+    const points = Number.isFinite(rawPoints) && rawPoints > 0 ? rawPoints : 10;
+
+    let correctAnswer: string | undefined = rawKey || undefined;
+    let correctAnswers: string[] | undefined = undefined;
+
+    const matchOptionFromToken = (token: string): string => {
+      const clean = token.trim();
+      if (!clean) return clean;
+      const singleLetterMatch = clean.match(/^([A-Ea-e])[.)]?$/);
+      if (singleLetterMatch && options.length > 0) {
+        const idx = singleLetterMatch[1].toUpperCase().charCodeAt(0) - 65;
+        if (options[idx]) return options[idx];
+      }
+      const exactPrefix = options.find((o) => o.toLowerCase() === clean.toLowerCase());
+      if (exactPrefix) return exactPrefix;
+      const textMatch = options.find((o) => o.replace(/^[A-E]\.\s*/i, '').trim().toLowerCase() === clean.toLowerCase());
+      if (textMatch) return textMatch;
+      return clean;
+    };
+
+    if (type === 'pilihan_ganda' && rawKey) {
+      correctAnswer = matchOptionFromToken(rawKey);
+    } else if (type === 'pilihan_ganda_kompleks' && rawKey) {
+      correctAnswers = rawKey
+        .split(/[,;|]/)
+        .map((part) => matchOptionFromToken(part))
+        .filter(Boolean);
+      correctAnswer = undefined;
+    }
+
+    const promptText = getField(r, ['Pertanyaan', 'Soal', 'Butir Soal', 'Question']) || `Pertanyaan nomor ${i + 1}`;
 
     return {
-      id: 'q_import_' + Date.now() + '_' + i,
+      id: `q_import_${baseTs}_${i}_${Math.random().toString(36).substring(2, 6)}`,
       type,
-      prompt: String(r['Pertanyaan'] || `Pertanyaan nomor ${i + 1}`).trim(),
-      points: Number(r['Bobot Nilai']) || 10,
+      prompt: promptText,
+      points,
       mediaType,
-      mediaUrl: r['URL Media'] ? String(r['URL Media']).trim() : undefined,
+      mediaUrl,
       options: options.length > 0 ? options : undefined,
-      correctAnswer: r['Kunci Jawaban'] ? String(r['Kunci Jawaban']).trim() : undefined,
-      explanation: r['Penjelasan'] ? String(r['Penjelasan']).trim() : undefined,
+      correctAnswer,
+      correctAnswers,
+      explanation: rawExplanation,
     };
   });
 }

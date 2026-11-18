@@ -372,17 +372,27 @@ export const tursoService = {
   },
 
   async saveExam(exam: Exam): Promise<boolean> {
-    // 1. Simpan via server proxy untuk replikasi instan antar-browser
+    // 1. Prioritaskan simpan via server proxy (/api/turso/save-exam) dan AWAIT hingga commit selesai
     try {
-      fetch('/api/turso/save-exam', {
+      const res = await fetch('/api/turso/save-exam', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ exam }),
-      }).catch(() => {});
-    } catch (e) {}
+      });
+      if (res.ok) {
+        const data = await res.json();
+        if (data.success) {
+          clearTursoAuthError();
+          return true;
+        }
+      }
+    } catch (e) {
+      console.warn('Server proxy saveExam failed, trying direct LibSQL client:', e);
+    }
 
+    // 2. Fallback: simpan langsung via client LibSQL di browser
     const client = getTursoClient();
-    if (!client) return true;
+    if (!client) return false;
 
     try {
       await client.execute({
@@ -433,17 +443,26 @@ export const tursoService = {
   },
 
   async deleteExam(examId: string): Promise<boolean> {
-    // 1. Hapus via server proxy
+    // 1. Hapus via server proxy dan AWAIT hingga selesai
     try {
-      fetch('/api/turso/delete-exam', {
+      const res = await fetch('/api/turso/delete-exam', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ examId }),
-      }).catch(() => {});
-    } catch (e) {}
+      });
+      if (res.ok) {
+        const data = await res.json();
+        if (data.success) {
+          clearTursoAuthError();
+          return true;
+        }
+      }
+    } catch (e) {
+      console.warn('Server proxy deleteExam failed, trying direct LibSQL client:', e);
+    }
 
     const client = getTursoClient();
-    if (!client) return true;
+    if (!client) return false;
 
     try {
       await client.execute({

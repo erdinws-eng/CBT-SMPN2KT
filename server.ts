@@ -768,13 +768,23 @@ app.get("/api/turso/data", async (_req, res) => {
       return res.json({ success: false, isConfigured: false, message: "Turso belum dikonfigurasi di server." });
     }
 
-    // Ambil semua tabel secara paralel
+    // Ambil semua tabel secara paralel, lacak status keberhasilan agar error sementara tidak menimpa data lokal dengan array kosong
+    const safeQuery = async (sql: string) => {
+      try {
+        const result = await client.execute(sql);
+        return { ok: true, rows: result.rows || [] };
+      } catch (qErr) {
+        console.warn(`Turso query warning (${sql.slice(0, 40)}):`, qErr);
+        return { ok: false, rows: [] };
+      }
+    };
+
     const [settingsRes, usersRes, subjectsRes, examsRes, attemptsRes] = await Promise.all([
-      client.execute("SELECT * FROM school_settings WHERE id = 'default_school' LIMIT 1").catch(() => ({ rows: [] })),
-      client.execute("SELECT * FROM users ORDER BY created_at ASC").catch(() => ({ rows: [] })),
-      client.execute("SELECT * FROM subjects ORDER BY code ASC").catch(() => ({ rows: [] })),
-      client.execute("SELECT * FROM exams ORDER BY created_at DESC").catch(() => ({ rows: [] })),
-      client.execute("SELECT * FROM exam_attempts ORDER BY started_at DESC").catch(() => ({ rows: [] })),
+      safeQuery("SELECT * FROM school_settings WHERE id = 'default_school' LIMIT 1"),
+      safeQuery("SELECT * FROM users ORDER BY created_at ASC"),
+      safeQuery("SELECT * FROM subjects ORDER BY code ASC"),
+      safeQuery("SELECT * FROM exams ORDER BY created_at DESC"),
+      safeQuery("SELECT * FROM exam_attempts ORDER BY started_at DESC"),
     ]);
 
     let settings = null;
@@ -904,10 +914,10 @@ app.get("/api/turso/data", async (_req, res) => {
       success: true,
       isConfigured: true,
       settings,
-      users,
-      subjects,
-      exams,
-      attempts,
+      users: usersRes.ok ? users : null,
+      subjects: subjectsRes.ok ? subjects : null,
+      exams: examsRes.ok ? exams : null,
+      attempts: attemptsRes.ok ? attempts : null,
       syncedAt: new Date().toISOString(),
     });
   } catch (err: any) {
@@ -971,8 +981,8 @@ app.post("/api/turso/save-exam", async (req, res) => {
         target_classes, start_time, end_time, duration_minutes, min_submit_minutes,
         kkm, allow_retake, max_retakes, release_score, randomize_questions,
         randomize_options, lockdown_browser, max_violations, token, questions,
-        status, is_active
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        status, is_active, created_at
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       args: [
         exam.id,
         exam.title,
@@ -997,6 +1007,7 @@ app.post("/api/turso/save-exam", async (req, res) => {
         JSON.stringify(exam.questions || []),
         exam.status || "active",
         exam.isActive === false ? 0 : 1,
+        exam.createdAt || new Date().toISOString(),
       ],
     });
 

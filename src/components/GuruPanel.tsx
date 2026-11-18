@@ -76,7 +76,7 @@ interface GuruPanelProps {
   students: User[];
   attempts: ExamAttempt[];
   settings: SchoolSettings;
-  onUpdateExams: (exams: Exam[]) => void;
+  onUpdateExams: (exams: Exam[]) => void | Promise<boolean | void>;
   onUpdateAttempts: (attempts: ExamAttempt[]) => void;
   onOpenTursoModal?: () => void;
   onLogout?: () => void;
@@ -189,6 +189,7 @@ export default function GuruPanel({
   const [bankSoalSubjectFilter, setBankSoalSubjectFilter] = useState<string>('all');
   const [bankSoalSearchQuery, setBankSoalSearchQuery] = useState<string>('');
   const [bankSoalTypeFilter, setBankSoalTypeFilter] = useState<string>('all');
+  const [isImportingQuestions, setIsImportingQuestions] = useState<boolean>(false);
   const [rekapClassFilter, setRekapClassFilter] = useState<string>('Semua Kelas');
   const [evaluatingAttemptId, setEvaluatingAttemptId] = useState<string | null>(null);
   const [evaluatingScores, setEvaluatingScores] = useState<Record<string, number>>({});
@@ -555,17 +556,26 @@ export default function GuruPanel({
   };
 
   // Upload Soal Excel Handler
-  const handleUploadSoalExcel = async (e: React.ChangeEvent<HTMLInputElement>) => {
+  const handleUploadSoalExcel = async (
+    e: React.ChangeEvent<HTMLInputElement>,
+    targetExam: Exam | null = selectedExam
+  ) => {
     const file = e.target.files?.[0];
-    if (!file || !selectedExam) return;
+    e.target.value = '';
+    if (!file || !targetExam) return;
 
+    setIsImportingQuestions(true);
     try {
       const parsed = await parseSoalExcel(file);
       if (parsed.length === 0) {
-        alert('File Excel tidak memiliki baris soal yang valid.');
+        showToast(
+          'File Excel Kosong',
+          'File Excel tidak memiliki baris soal yang valid. Pastikan kolom "Pertanyaan" terisi.',
+          'error'
+        );
         return;
       }
-      const existingIds = new Set(selectedExam.questions.map((q) => q.id));
+      const existingIds = new Set(targetExam.questions.map((q) => q.id));
       const sanitizedParsed = parsed.map((p, pIdx) => {
         let finalId = p.id;
         if (!finalId || existingIds.has(finalId)) {
@@ -575,30 +585,51 @@ export default function GuruPanel({
         return { ...p, id: finalId };
       });
       const updatedExams = allExams.map((ex) =>
-        ex.id === selectedExam.id
+        ex.id === targetExam.id
           ? { ...ex, questions: [...ex.questions, ...sanitizedParsed] }
           : ex
       );
-      onUpdateExams(updatedExams);
-      showSuccess(`Berhasil mengimpor ${sanitizedParsed.length} butir soal dari Excel (.xlsx)!`);
+
+      setSelectedExamId(targetExam.id);
+      setBankSoalSearchQuery('');
+      setBankSoalTypeFilter('all');
+
+      const savedOk = await onUpdateExams(updatedExams);
+      if (savedOk === false) {
+        showToast(
+          'Tersimpan Lokal (Perlu Sinkron Ulang)',
+          `${sanitizedParsed.length} soal ditambahkan, namun gagal disimpan ke database Turso. Periksa koneksi lalu klik Sinkron Database.`,
+          'error'
+        );
+      } else {
+        showSuccess(
+          `Berhasil mengimpor & menyimpan ${sanitizedParsed.length} butir soal dari Excel (.xlsx) ke Turso!`
+        );
+      }
     } catch (err: any) {
       showToast('Gagal Impor Excel', err?.message || 'Format file Excel tidak sesuai.', 'error');
+    } finally {
+      setIsImportingQuestions(false);
     }
-    e.target.value = '';
   };
 
   // Upload Soal DOCX/Doc/Text Handler
-  const handleUploadDocxText = async (e: React.ChangeEvent<HTMLInputElement>) => {
+  const handleUploadDocxText = async (
+    e: React.ChangeEvent<HTMLInputElement>,
+    targetExam: Exam | null = selectedExam
+  ) => {
     const file = e.target.files?.[0];
-    if (!file || !selectedExam) return;
+    e.target.value = '';
+    if (!file || !targetExam) return;
 
+    setIsImportingQuestions(true);
     try {
       const parsed = await parseDocxTextQuestions(file);
       if (parsed.length === 0) {
         showToast('Gagal Ekstrak Soal', 'Tidak dapat mengekstrak butir soal. Pastikan setiap soal diawali nomor (1. 2. dll) dan kunci jawaban (Kunci: A).', 'error');
         return;
       }
-      const existingIds = new Set(selectedExam.questions.map((q) => q.id));
+      const existingIds = new Set(targetExam.questions.map((q) => q.id));
       const sanitizedParsed = parsed.map((p, pIdx) => {
         let finalId = p.id;
         if (!finalId || existingIds.has(finalId)) {
@@ -608,16 +639,30 @@ export default function GuruPanel({
         return { ...p, id: finalId };
       });
       const updatedExams = allExams.map((ex) =>
-        ex.id === selectedExam.id
+        ex.id === targetExam.id
           ? { ...ex, questions: [...ex.questions, ...sanitizedParsed] }
           : ex
       );
-      onUpdateExams(updatedExams);
-      showSuccess(`Berhasil membaca ${sanitizedParsed.length} soal dari dokumen "${file.name}"!`);
+
+      setSelectedExamId(targetExam.id);
+      setBankSoalSearchQuery('');
+      setBankSoalTypeFilter('all');
+
+      const savedOk = await onUpdateExams(updatedExams);
+      if (savedOk === false) {
+        showToast(
+          'Tersimpan Lokal (Perlu Sinkron Ulang)',
+          `${sanitizedParsed.length} soal ditambahkan, namun gagal disimpan ke database Turso.`,
+          'error'
+        );
+      } else {
+        showSuccess(`Berhasil membaca & menyimpan ${sanitizedParsed.length} soal dari dokumen "${file.name}" ke Turso!`);
+      }
     } catch (err: any) {
       showToast('Gagal Memproses Dokumen', err?.message || 'Gagal membaca isi dokumen.', 'error');
+    } finally {
+      setIsImportingQuestions(false);
     }
-    e.target.value = '';
   };
 
   // In-App Delete / Action Executor
@@ -2294,25 +2339,27 @@ export default function GuruPanel({
                       </button>
 
                       {/* Upload DOC / DOCX Soal */}
-                      <label className="px-3 py-2 bg-blue-50 hover:bg-blue-100 text-blue-700 border border-blue-200 rounded-xl text-xs font-semibold flex items-center justify-center gap-2 transition cursor-pointer">
-                        <FileText className="w-4 h-4" />
+                      <label className={`px-3 py-2 bg-blue-50 hover:bg-blue-100 text-blue-700 border border-blue-200 rounded-xl text-xs font-semibold flex items-center justify-center gap-2 transition ${isImportingQuestions ? 'opacity-60 pointer-events-none' : 'cursor-pointer'}`}>
+                        {isImportingQuestions ? <Loader2 className="w-4 h-4 animate-spin" /> : <FileText className="w-4 h-4" />}
                         <span>Impor Word</span>
                         <input
                           type="file"
                           accept=".doc, .docx, .txt"
-                          onChange={handleUploadDocxText}
+                          disabled={isImportingQuestions}
+                          onChange={(e) => handleUploadDocxText(e, activeExam)}
                           className="hidden"
                         />
                       </label>
 
                       {/* Upload Excel Soal */}
-                      <label className="px-3 py-2 bg-emerald-50 hover:bg-emerald-100 text-emerald-700 border border-emerald-200 rounded-xl text-xs font-semibold flex items-center justify-center gap-2 transition cursor-pointer">
-                        <Upload className="w-4 h-4" />
-                        <span>Impor Excel</span>
+                      <label className={`px-3 py-2 bg-emerald-50 hover:bg-emerald-100 text-emerald-700 border border-emerald-200 rounded-xl text-xs font-semibold flex items-center justify-center gap-2 transition ${isImportingQuestions ? 'opacity-60 pointer-events-none' : 'cursor-pointer'}`}>
+                        {isImportingQuestions ? <Loader2 className="w-4 h-4 animate-spin" /> : <Upload className="w-4 h-4" />}
+                        <span>{isImportingQuestions ? 'Mengimpor...' : 'Impor Excel'}</span>
                         <input
                           type="file"
                           accept=".xlsx, .xls"
-                          onChange={handleUploadSoalExcel}
+                          disabled={isImportingQuestions}
+                          onChange={(e) => handleUploadSoalExcel(e, activeExam)}
                           className="hidden"
                         />
                       </label>
