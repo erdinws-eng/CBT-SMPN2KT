@@ -111,6 +111,7 @@ export default function GuruPanel({
   const [activeTab, setActiveTab] = useState<'dashboard' | 'jadwal' | 'bank_soal' | 'rekap' | 'evaluasi' | 'riwayat_siswa'>('dashboard');
   const [searchAttemptQuery, setSearchAttemptQuery] = useState('');
   const [selectedClassFilter, setSelectedClassFilter] = useState('');
+  const [selectedSubjectFilter, setSelectedSubjectFilter] = useState<string>('all');
   const [selectedExamId, setSelectedExamId] = useState<string>(exams[0]?.id || '');
   const [riwayatSelectedExamId, setRiwayatSelectedExamId] = useState<string>('all');
   const [riwayatSelectedClass, setRiwayatSelectedClass] = useState<string>('Semua Kelas');
@@ -371,11 +372,48 @@ export default function GuruPanel({
     setTimeout(() => setSuccessMessage(''), 4500);
   };
 
-  const availableExamsList = exams;
+  const uniqueExamSubjects = Array.from(new Set(exams.map((e) => e.subjectName).filter(Boolean))).sort();
+  const effectiveSubjectFilter =
+    selectedSubjectFilter !== 'all' && uniqueExamSubjects.includes(selectedSubjectFilter)
+      ? selectedSubjectFilter
+      : 'all';
+  const availableExamsList =
+    effectiveSubjectFilter === 'all'
+      ? exams
+      : exams.filter((e) => e.subjectName === effectiveSubjectFilter);
+
+  const handleSubjectFilterChange = (newSubject: string) => {
+    setSelectedSubjectFilter(newSubject);
+    const matchingExams =
+      newSubject === 'all' ? exams : exams.filter((e) => e.subjectName === newSubject);
+    if (matchingExams.length > 0) {
+      if (!matchingExams.some((e) => e.id === selectedExamId)) {
+        setSelectedExamId(matchingExams[0].id);
+      }
+      if (riwayatSelectedExamId !== 'all' && !matchingExams.some((e) => e.id === riwayatSelectedExamId)) {
+        setRiwayatSelectedExamId('all');
+      }
+    } else {
+      setRiwayatSelectedExamId('all');
+    }
+  };
+
+  const getExamPackageLabel = (ex: Exam, list: Exam[]) => {
+    const hasDuplicateTitle = list.filter((item) => item.title === ex.title).length > 1;
+    if (hasDuplicateTitle) {
+      const classSuffix = ex.targetClasses?.length ? ` (${ex.targetClasses.join(', ')})` : '';
+      return effectiveSubjectFilter === 'all' && ex.subjectName
+        ? `${ex.title} — ${ex.subjectName}${classSuffix}`
+        : `${ex.title}${classSuffix}`;
+    }
+    return ex.title;
+  };
+
   const selectedExam =
     availableExamsList.find((e) => e.id === selectedExamId) ||
     availableExamsList.find((e) => e.id === riwayatSelectedExamId) ||
     availableExamsList[0] ||
+    exams[0] ||
     null;
   const allExamAttempts = selectedExam
     ? attempts.filter((a) => a.examId === selectedExam.id).sort((a, b) => a.studentName.localeCompare(b.studentName))
@@ -2702,67 +2740,92 @@ export default function GuruPanel({
 
         return (
         <div className="space-y-4">
-          <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-3 bg-white p-4 rounded-2xl border border-slate-200 shadow-2xs">
-            <div>
+          <div className="flex flex-col lg:flex-row lg:items-start lg:justify-between gap-4 bg-white p-4 sm:p-5 rounded-2xl border border-slate-200 shadow-2xs">
+            <div className="min-w-0">
               <h2 className="text-base font-extrabold text-slate-900">
                 Rekap Nilai Siswa: {selectedExam?.title}
               </h2>
-              <p className="text-xs text-slate-500">
-                Kriteria Ketuntasan Minimal (KKM): <strong>{selectedExam?.kkm}</strong> • Status Rilis: {selectedExam?.releaseScore ? 'Terbuka untuk Siswa' : 'Ditutup'}
+              <p className="text-xs text-slate-500 mt-0.5">
+                Mapel: <strong className="text-slate-700">{selectedExam?.subjectName || '-'}</strong> • KKM: <strong>{selectedExam?.kkm}</strong> • Status Rilis: {selectedExam?.releaseScore ? 'Terbuka untuk Siswa' : 'Ditutup'}
               </p>
             </div>
 
-            <div className="flex items-center gap-2 overflow-x-auto pb-1 md:pb-0 hide-scrollbar max-w-full">
-              <select
-                value={selectedExam?.id || ''}
-                onChange={(e) => {
-                  setSelectedExamId(e.target.value);
-                  setRiwayatSelectedExamId(e.target.value);
-                }}
-                className="px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-xs font-bold text-slate-700 focus:outline-none focus:ring-2 focus:ring-indigo-500 cursor-pointer min-w-[170px]"
-              >
-                {availableExamsList.map(ex => (
-                  <option key={ex.id} value={ex.id}>{ex.title}</option>
-                ))}
-              </select>
+            <div className="flex flex-col lg:items-end gap-2.5 shrink-0">
+              {/* Baris 1: Filter Paket Soal, Mapel, Kelas */}
+              <div className="flex flex-wrap items-center gap-2">
+                <select
+                  aria-label="Filter Paket Soal"
+                  value={selectedExam?.id || ''}
+                  onChange={(e) => {
+                    setSelectedExamId(e.target.value);
+                    setRiwayatSelectedExamId(e.target.value);
+                  }}
+                  className="px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-xs font-bold text-slate-700 focus:outline-none focus:ring-2 focus:ring-indigo-500 cursor-pointer min-w-[180px] max-w-[260px]"
+                >
+                  {availableExamsList.map((ex) => (
+                    <option key={ex.id} value={ex.id}>
+                      {getExamPackageLabel(ex, availableExamsList)}
+                    </option>
+                  ))}
+                </select>
 
-              <select
-                value={rekapClassFilter}
-                onChange={(e) => {
-                  setRekapClassFilter(e.target.value);
-                  setRiwayatSelectedClass(e.target.value);
-                }}
-                className="px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-xs font-bold text-slate-700 focus:outline-none focus:ring-2 focus:ring-indigo-500 cursor-pointer"
-              >
-                <option value="Semua Kelas">Semua Kelas</option>
-                {uniqueRekapClasses.map(cls => (
-                  <option key={cls} value={cls}>Kelas {cls}</option>
-                ))}
-              </select>
-              <button
-                id="btn-export-exam-results-excel"
-                onClick={() =>
-                  exportExamResultsToExcel(
-                    selectedExam?.title || 'Ujian',
-                    selectedExam?.subjectName || 'Mapel',
-                    selectedExam?.kkm || 75,
-                    rekapStudentList.map(item => item.attempt)
-                  )
-                }
-                className="px-3.5 py-2 bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl text-xs font-bold flex items-center gap-1.5 transition cursor-pointer shadow-xs whitespace-nowrap"
-              >
-                <FileSpreadsheet className="w-4 h-4" />
-                <span>Unduh Rekap Excel (.xlsx)</span>
-              </button>
+                <select
+                  aria-label="Filter Mapel"
+                  value={effectiveSubjectFilter}
+                  onChange={(e) => handleSubjectFilterChange(e.target.value)}
+                  className="px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-xs font-bold text-slate-700 focus:outline-none focus:ring-2 focus:ring-indigo-500 cursor-pointer min-w-[150px]"
+                >
+                  <option value="all">Semua Mapel</option>
+                  {uniqueExamSubjects.map((sub) => (
+                    <option key={sub} value={sub}>
+                      {sub}
+                    </option>
+                  ))}
+                </select>
 
-              <button
-                id="btn-print-exam-rekap"
-                onClick={() => setIsPrintRekapModalOpen(true)}
-                className="px-3.5 py-2 bg-slate-800 hover:bg-slate-900 text-white rounded-xl text-xs font-bold flex items-center gap-1.5 transition cursor-pointer shadow-xs whitespace-nowrap"
-              >
-                <Printer className="w-4 h-4" />
-                <span>Print Rekap Nilai</span>
-              </button>
+                <select
+                  aria-label="Filter Kelas"
+                  value={rekapClassFilter}
+                  onChange={(e) => {
+                    setRekapClassFilter(e.target.value);
+                    setRiwayatSelectedClass(e.target.value);
+                  }}
+                  className="px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-xs font-bold text-slate-700 focus:outline-none focus:ring-2 focus:ring-indigo-500 cursor-pointer"
+                >
+                  <option value="Semua Kelas">Semua Kelas</option>
+                  {uniqueRekapClasses.map(cls => (
+                    <option key={cls} value={cls}>Kelas {cls}</option>
+                  ))}
+                </select>
+              </div>
+
+              {/* Baris 2 (Di bawah filter): Tombol Unduh Rekap & Print Rekap */}
+              <div className="flex flex-wrap items-center gap-2">
+                <button
+                  id="btn-export-exam-results-excel"
+                  onClick={() =>
+                    exportExamResultsToExcel(
+                      selectedExam?.title || 'Ujian',
+                      selectedExam?.subjectName || 'Mapel',
+                      selectedExam?.kkm || 75,
+                      rekapStudentList.map(item => item.attempt)
+                    )
+                  }
+                  className="px-3.5 py-2 bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl text-xs font-bold flex items-center gap-1.5 transition cursor-pointer shadow-xs whitespace-nowrap"
+                >
+                  <FileSpreadsheet className="w-4 h-4" />
+                  <span>Unduh Rekap Excel (.xlsx)</span>
+                </button>
+
+                <button
+                  id="btn-print-exam-rekap"
+                  onClick={() => setIsPrintRekapModalOpen(true)}
+                  className="px-3.5 py-2 bg-slate-800 hover:bg-slate-900 text-white rounded-xl text-xs font-bold flex items-center gap-1.5 transition cursor-pointer shadow-xs whitespace-nowrap"
+                >
+                  <Printer className="w-4 h-4" />
+                  <span>Print Rekap Nilai</span>
+                </button>
+              </div>
             </div>
           </div>
 
@@ -2859,11 +2922,12 @@ export default function GuruPanel({
           );
         }
 
-        const availableExamsList = exams;
-        const isExamValid = riwayatSelectedExamId === 'all' || availableExamsList.some(e => e.id === riwayatSelectedExamId);
+        const riwayatExamList = availableExamsList;
+        const isExamValid = riwayatSelectedExamId === 'all' || riwayatExamList.some(e => e.id === riwayatSelectedExamId);
         const activeExamId = isExamValid ? (riwayatSelectedExamId || 'all') : 'all';
-        const activeExam = availableExamsList.find(e => e.id === activeExamId);
+        const activeExam = riwayatExamList.find(e => e.id === activeExamId);
         const activeClass = riwayatSelectedClass || 'Semua Kelas';
+        const allowedExamIds = new Set(riwayatExamList.map(e => e.id));
 
         // Seluruh riwayat ujian akun guru ini yang ada di sistem (untuk validasi tombol Hapus Semua)
         const totalSubmittedInSystem = attempts.filter(a =>
@@ -2873,6 +2937,7 @@ export default function GuruPanel({
         // Seluruh riwayat ujian akun guru ini yang telah selesai dikumpulkan atau didiskualifikasi
         const examSubmittedAttempts = attempts.filter(a =>
           (a.status === 'submitted' || a.status === 'violation_disqualified') &&
+          allowedExamIds.has(a.examId) &&
           (activeExamId === 'all' || a.examId === activeExamId)
         );
         const uniqueClasses = Array.from(new Set(examSubmittedAttempts.map(a => a.studentClass).filter(Boolean))).sort();
@@ -2929,7 +2994,7 @@ export default function GuruPanel({
             <div>
               <h2 className="text-base font-extrabold text-slate-900">Riwayat Ujian & Remedial Siswa</h2>
               <p className="text-xs text-slate-500">
-                Ujian: <strong className="text-indigo-600">{activeExam ? activeExam.title : `Semua Paket Ujian (${availableExamsList.length} Ujian)`}</strong> • KKM: <strong>{activeExam?.kkm || 75}</strong>
+                Ujian: <strong className="text-indigo-600">{activeExam ? activeExam.title : `Semua Paket Ujian (${riwayatExamList.length} Ujian)`}</strong> • KKM: <strong>{activeExam?.kkm || 75}</strong>
               </p>
             </div>
             <div className="flex items-center gap-2">
@@ -2956,9 +3021,24 @@ export default function GuruPanel({
           </div>
 
           <div className="bg-white rounded-3xl border border-slate-200 shadow-sm overflow-hidden flex flex-col">
-            <div className="p-4 sm:p-5 border-b border-slate-200 bg-slate-50/50 flex flex-col sm:flex-row gap-4 sm:items-center justify-between">
-              <div className="flex flex-col sm:flex-row gap-3 w-full sm:w-auto">
+            <div className="p-4 sm:p-5 border-b border-slate-200 bg-slate-50/50 flex flex-col lg:flex-row gap-3 lg:items-center justify-between">
+              <div className="flex flex-wrap items-center gap-2.5 w-full lg:w-auto">
+                 {/* Filter 1: Mapel */}
                  <select
+                   aria-label="Filter Mapel"
+                   value={effectiveSubjectFilter}
+                   onChange={(e) => handleSubjectFilterChange(e.target.value)}
+                   className="px-3 py-2 bg-white border border-slate-300 rounded-xl text-xs font-bold text-slate-700 focus:ring-2 focus:ring-indigo-500 transition shadow-xs cursor-pointer min-w-[160px]"
+                 >
+                   <option value="all">Semua Mapel</option>
+                   {uniqueExamSubjects.map((sub) => (
+                     <option key={sub} value={sub}>{sub}</option>
+                   ))}
+                 </select>
+
+                 {/* Filter 2: Paket Soal */}
+                 <select
+                   aria-label="Filter Paket Soal"
                    value={activeExamId}
                    onChange={(e) => {
                      setRiwayatSelectedExamId(e.target.value);
@@ -2966,21 +3046,23 @@ export default function GuruPanel({
                        setSelectedExamId(e.target.value);
                      }
                    }}
-                   className="px-3 py-2 bg-white border border-slate-300 rounded-xl text-sm focus:ring-2 focus:ring-indigo-500 transition shadow-xs cursor-pointer min-w-[200px]"
+                   className="px-3 py-2 bg-white border border-slate-300 rounded-xl text-xs font-bold text-slate-700 focus:ring-2 focus:ring-indigo-500 transition shadow-xs cursor-pointer min-w-[200px] max-w-[280px]"
                  >
-                   <option value="all">Semua Paket Ujian ({availableExamsList.length} Ujian)</option>
-                   {availableExamsList.map(ex => (
-                     <option key={ex.id} value={ex.id}>{ex.title}</option>
+                   <option value="all">Semua Paket Soal ({riwayatExamList.length} Ujian)</option>
+                   {riwayatExamList.map(ex => (
+                     <option key={ex.id} value={ex.id}>{getExamPackageLabel(ex, riwayatExamList)}</option>
                    ))}
                  </select>
 
+                 {/* Filter 3: Kelas */}
                  <select
+                   aria-label="Filter Kelas"
                    value={activeClass}
                    onChange={(e) => {
                      setRiwayatSelectedClass(e.target.value);
                      setRekapClassFilter(e.target.value);
                    }}
-                   className="px-3 py-2 bg-white border border-slate-300 rounded-xl text-sm focus:ring-2 focus:ring-indigo-500 transition shadow-xs cursor-pointer min-w-[150px]"
+                   className="px-3 py-2 bg-white border border-slate-300 rounded-xl text-xs font-bold text-slate-700 focus:ring-2 focus:ring-indigo-500 transition shadow-xs cursor-pointer min-w-[140px]"
                  >
                    <option value="Semua Kelas">Semua Kelas</option>
                    {uniqueClasses.map(cls => (
@@ -3163,21 +3245,42 @@ export default function GuruPanel({
               </p>
             </div>
             
-            <div className="flex items-center gap-2 overflow-x-auto pb-1 md:pb-0 hide-scrollbar max-w-full">
+            <div className="flex flex-wrap items-center gap-2">
+              {/* Filter 1: Mapel */}
               <select
-                value={selectedExam?.id || selectedExamId}
+                aria-label="Filter Mapel"
+                value={effectiveSubjectFilter}
+                onChange={(e) => handleSubjectFilterChange(e.target.value)}
+                className="px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-xs font-bold text-slate-700 focus:outline-none focus:ring-2 focus:ring-indigo-500 cursor-pointer min-w-[150px]"
+              >
+                <option value="all">Semua Mapel</option>
+                {uniqueExamSubjects.map((sub) => (
+                  <option key={sub} value={sub}>
+                    {sub}
+                  </option>
+                ))}
+              </select>
+
+              {/* Filter 2: Paket Soal */}
+              <select
+                aria-label="Filter Paket Soal"
+                value={selectedExam?.id || ''}
                 onChange={(e) => {
                   setSelectedExamId(e.target.value);
                   setRiwayatSelectedExamId(e.target.value);
                 }}
-                className="px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-xs font-bold text-slate-700 focus:outline-none focus:ring-2 focus:ring-indigo-500 cursor-pointer min-w-[170px]"
+                className="px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-xs font-bold text-slate-700 focus:outline-none focus:ring-2 focus:ring-indigo-500 cursor-pointer min-w-[180px] max-w-[260px]"
               >
-                {availableExamsList.map(ex => (
-                  <option key={ex.id} value={ex.id}>{ex.title}</option>
+                {availableExamsList.map((ex) => (
+                  <option key={ex.id} value={ex.id}>
+                    {getExamPackageLabel(ex, availableExamsList)}
+                  </option>
                 ))}
               </select>
 
+              {/* Filter 3: Kelas */}
               <select
+                aria-label="Filter Kelas"
                 value={rekapClassFilter}
                 onChange={(e) => {
                   setRekapClassFilter(e.target.value);
