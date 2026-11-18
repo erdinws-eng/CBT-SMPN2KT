@@ -30,6 +30,7 @@ import {
   ShieldCheck,
   Info,
   LayoutGrid,
+  LogOut,
 } from 'lucide-react';
 import {
   Exam,
@@ -50,6 +51,8 @@ interface SiswaPanelProps {
   settings: SchoolSettings;
   onUpdateAttempts: (attempts: ExamAttempt[]) => void;
   onRefreshData?: () => Promise<void>;
+  onLogout?: () => void;
+  onExamActiveChange?: (isActive: boolean) => void;
 }
 
 export default function SiswaPanel({
@@ -59,6 +62,8 @@ export default function SiswaPanel({
   settings,
   onUpdateAttempts,
   onRefreshData,
+  onLogout,
+  onExamActiveChange,
 }: SiswaPanelProps) {
   // Layout state
   const [activeTab, setActiveTab] = useState<'dashboard' | 'riwayat'>('dashboard');
@@ -77,6 +82,12 @@ export default function SiswaPanel({
   const [isSubmittingExam, setIsSubmittingExam] = useState<boolean>(false);
   const isSubmittingRef = useRef<boolean>(false);
   const [isSavingExam, setIsSavingExam] = useState<boolean>(false);
+  const [submitPhase, setSubmitPhase] = useState<'idle' | 'sending' | 'sent' | 'result'>('idle');
+  const [examResultData, setExamResultData] = useState<{
+    exam: Exam;
+    attempt: ExamAttempt;
+    syncedToServer: boolean;
+  } | null>(null);
   const [isQuestionInfoOpen, setIsQuestionInfoOpen] = useState<boolean>(false);
   const [isQuestionListOpen, setIsQuestionListOpen] = useState<boolean>(true);
   const [isCheckingPermission, setIsCheckingPermission] = useState<boolean>(false);
@@ -89,6 +100,14 @@ export default function SiswaPanel({
 
   // Wake lock ref
   const wakeLockRef = useRef<any>(null);
+
+  // Beritahu App.tsx saat siswa sedang berada di ruang ujian agar polling berat dijeda
+  useEffect(() => {
+    onExamActiveChange?.(Boolean(activeExam));
+    return () => {
+      onExamActiveChange?.(false);
+    };
+  }, [activeExam, onExamActiveChange]);
 
   // Filter exams for student's class
   const studentClass = currentUser.classGrade || '8A';
@@ -419,7 +438,7 @@ export default function SiswaPanel({
 
   // 2. Anti-Cheat Monitoring (Visibility Change, Tab Switch, Blur, Exit Fullscreen)
   useEffect(() => {
-    if (!activeExam || !activeExam.lockdownBrowser || currentAttempt?.status !== 'in_progress') {
+    if (!activeExam || !activeExam.lockdownBrowser || currentAttempt?.status !== 'in_progress' || submitPhase !== 'idle') {
       return;
     }
 
@@ -541,7 +560,7 @@ export default function SiswaPanel({
       window.removeEventListener('contextmenu', handleContextMenu);
       document.removeEventListener('touchstart', handleTouchStart);
     };
-  }, [activeExam, currentAttempt]);
+  }, [activeExam, currentAttempt, submitPhase]);
 
   // 3. Countdown Timer & Minimum submit check
   useEffect(() => {
@@ -599,26 +618,24 @@ export default function SiswaPanel({
     await handleFinishExam(false);
   };
 
-  // Calculate Score, Save to Turso & localStorage without artificial delays, and Finalize
+  // Calculate Score, Save to Turso & localStorage, and Show Submit Animation -> Result Window (Still Fullscreen)
   const handleFinishExam = async (isDisqualified = false, violationReason = '') => {
     if (!activeExam || !currentAttempt) return;
 
-    // Pastikan flag submitting aktif agar saat exitFullscreen dipanggil, tidak terpicu event pelanggaran
-    isSubmittingRef.current = true;
-    if (!isDisqualified) {
-      setIsSavingExam(true);
-    }
+    const finishedExam = activeExam;
 
-    // Langsung bebaskan wakeLock dan izinkan transisi fullscreen ponsel secara aman
-    try {
-      if (wakeLockRef.current) {
-        wakeLockRef.current.release?.().catch(() => {});
-      }
-      if (document.fullscreenElement && document.exitFullscreen) {
-        document.exitFullscreen().catch(() => {});
-      }
-    } catch (e) {
-      // Abaikan jika tidak didukung browser
+    // Pastikan flag submitting aktif agar event fullscreenchange/blur tidak memicu pelanggaran palsu
+    isSubmittingRef.current = true;
+    if (isDisqualified) {
+      // Pada pelanggaran, keluar dari fullscreen dan tampilkan modal pelanggaran di beranda siswa
+      try {
+        if (wakeLockRef.current) {
+          wakeLockRef.current.release?.().catch(() => {});
+        }
+        if (document.fullscreenElement && document.exitFullscreen) {
+          document.exitFullscreen().catch(() => {});
+        }
+      } catch (e) {}
     }
 
     let earnedPoints = 0;
@@ -782,81 +799,129 @@ export default function SiswaPanel({
       );
     } catch (e) {}
 
-    // 3. Tampilkan hasil ujian seketika di browser siswa (Zero-Lag UI, tidak menunggu antrian jaringan)
-    setActiveExam(null);
+    // 3. Jika dihentikan karena pelanggaran: langsung tampilkan modal pelanggaran & sinkron di latar belakang
+    if (isDisqualified) {
+      setActiveExam(null);
+      setCurrentAttempt(finalAttempt);
+      setIsSubmitConfirmOpen(false);
+      setIsSubmittingExam(false);
+      setIsSavingExam(false);
+      setSubmitPhase('idle');
+
+      setTimeout(() => {
+        isSubmittingRef.current = false;
+      }, 2500);
+
+      (async () => {
+        try {
+          const jitter = Math.floor(Math.random() * 600);
+          await new Promise((res) => setTimeout(res, jitter));
+
+          let success = await tursoService.saveExamAttempt(finalAttempt);
+          if (!success) {
+            await new Promise((res) => setTimeout(res, 1000));
+            success = await tursoService.saveExamAttempt(finalAttempt);
+          }
+          if (success) {
+            try {
+              localStorage.removeItem(`cbt_pending_attempt_${finalAttempt.id}`);
+            } catch (e) {}
+          }
+        } catch (err) {
+          console.warn('Latar belakang: Gagal menyimpan pelanggaran ke Turso:', err);
+        }
+      })();
+      return;
+    }
+
+    // 4. Untuk submit normal: TETAP DI MODE FULLSCREEN!
+    // Tampilkan animasi "Mengirim jawaban" -> "Jawaban terkirim" -> Jendela Hasil Nilai Siswa + Tombol OK (Logout)
     setCurrentAttempt(finalAttempt);
     setIsSubmitConfirmOpen(false);
     setIsSubmittingExam(false);
+    setIsSavingExam(false);
+    setExamResultData({ exam: finishedExam, attempt: finalAttempt, syncedToServer: false });
+    setSubmitPhase('sending');
 
-    // Tutup modal indikator penyimpanan setelah jeda visual halus (150ms)
-    setTimeout(() => {
-      setIsSavingExam(false);
-    }, 150);
+    const startedSendingAt = Date.now();
+    let syncSuccess = false;
 
-    // Trigger confetti on good completion
-    if (!isDisqualified && scorePercentage >= activeExam.kkm) {
+    try {
+      // Sebar koneksi bersamaan dengan jitter acak ringan (0 - 500ms)
+      const jitter = Math.floor(Math.random() * 500);
+      await new Promise((res) => setTimeout(res, jitter));
+
+      syncSuccess = await tursoService.saveExamAttempt(finalAttempt);
+      if (!syncSuccess) {
+        await new Promise((res) => setTimeout(res, 900));
+        syncSuccess = await tursoService.saveExamAttempt(finalAttempt);
+      }
+
+      if (syncSuccess) {
+        try {
+          localStorage.removeItem(`cbt_pending_attempt_${finalAttempt.id}`);
+        } catch (e) {}
+      }
+
+      // Bersihkan attempt in_progress lama dari Turso jika ada ID berbeda
+      const staleInProgress = attempts.filter(
+        (a) =>
+          a.examId === finishedExam.id &&
+          a.studentId === currentUser.id &&
+          a.status === 'in_progress' &&
+          a.id !== finalAttempt.id
+      );
+      for (const stale of staleInProgress) {
+        await tursoService.deleteExamAttempt(stale.id);
+      }
+    } catch (err) {
+      console.warn('Gagal mengirim attempt ke Turso:', err);
+      syncSuccess = false;
+    }
+
+    // Pastikan animasi loading "Mengirim jawaban" terlihat minimal 600ms agar tidak berkedip terlalu cepat
+    const elapsed = Date.now() - startedSendingAt;
+    if (elapsed < 600) {
+      await new Promise((res) => setTimeout(res, 600 - elapsed));
+    }
+
+    setExamResultData({ exam: finishedExam, attempt: finalAttempt, syncedToServer: syncSuccess });
+    setSubmitPhase('sent');
+
+    // Tampilkan animasi centang "Jawaban terkirim" selama ~1.2 detik sebelum memunculkan jendela hasil nilai
+    await new Promise((res) => setTimeout(res, 1200));
+    setSubmitPhase('result');
+
+    if (scorePercentage >= finishedExam.kkm) {
       confetti({
         particleCount: 120,
         spread: 80,
         origin: { y: 0.6 },
       });
     }
+  };
 
-    // Berikan jeda toleransi untuk perangkat ponsel agar event blur/fullscreenchange lambat tidak memicu false-violation
-    setTimeout(() => {
-      isSubmittingRef.current = false;
-    }, 2500);
-
-    // 4. Sinkronisasi ke Turso database dijalankan di latar belakang (Background Sync dengan Auto-Retry & Jitter)
-    // Hal ini menjamin 100-300 browser siswa dapat submit bersamaan tanpa overload atau saling mengunci
-    (async () => {
-      try {
-        // Berikan sedikit random jitter (0 - 1000ms) untuk mendistribusikan 100-300 koneksi bersamaan
-        const jitter = Math.floor(Math.random() * 1000);
-        await new Promise((res) => setTimeout(res, jitter));
-
-        let success = await tursoService.saveExamAttempt(finalAttempt);
-        if (!success) {
-          console.warn('Percobaan pertama simpan attempt tertunda, mencoba ulang di latar belakang...');
-          await new Promise((res) => setTimeout(res, 1200));
-          success = await tursoService.saveExamAttempt(finalAttempt);
-        }
-
-        // Jika jaringan sedang gangguan/offline, simpan ke antrian offline lokal untuk auto-sync saat online
-        if (!success) {
-          try {
-            localStorage.setItem(
-              `cbt_pending_attempt_${finalAttempt.id}`,
-              JSON.stringify(finalAttempt)
-            );
-          } catch (e) {}
-        } else {
-          try {
-            localStorage.removeItem(`cbt_pending_attempt_${finalAttempt.id}`);
-          } catch (e) {}
-        }
-
-        // Bersihkan attempt in_progress lama dari Turso jika ada ID berbeda
-        const staleInProgress = attempts.filter(
-          (a) =>
-            a.examId === activeExam.id &&
-            a.studentId === currentUser.id &&
-            a.status === 'in_progress' &&
-            a.id !== finalAttempt.id
-        );
-        for (const stale of staleInProgress) {
-          await tursoService.deleteExamAttempt(stale.id);
-        }
-      } catch (err) {
-        console.warn('Latar belakang: Gagal menyimpan attempt ke Turso:', err);
-        try {
-          localStorage.setItem(
-            `cbt_pending_attempt_${finalAttempt.id}`,
-            JSON.stringify(finalAttempt)
-          );
-        } catch (e) {}
+  // Handler tombol OK pada Jendela Hasil Nilai Siswa -> Keluar Fullscreen & Otomatis Logout ke Halaman Login
+  const handleResultOkLogout = async () => {
+    try {
+      if (wakeLockRef.current) {
+        wakeLockRef.current.release?.().catch(() => {});
       }
-    })();
+      if (document.fullscreenElement && document.exitFullscreen) {
+        await document.exitFullscreen().catch(() => {});
+      }
+    } catch (e) {}
+
+    isSubmittingRef.current = false;
+    setSubmitPhase('idle');
+    setExamResultData(null);
+    setActiveExam(null);
+    setCurrentAttempt(null);
+    onExamActiveChange?.(false);
+
+    if (onLogout) {
+      onLogout();
+    }
   };
 
   // Helper time format
@@ -2410,7 +2475,7 @@ export default function SiswaPanel({
         </div>
       )}
 
-      {/* MODAL POPUP PENYIMPANAN DATA UJIAN KE DATABASE (JEDA 1-2 DETIK) */}
+      {/* MODAL POPUP PENYIMPANAN DATA UJIAN KE DATABASE */}
       {isSavingExam && (
         <div className="fixed inset-0 z-[100] bg-slate-900/80 backdrop-blur-md flex items-center justify-center p-4 animate-in fade-in duration-150">
           <div className="bg-white rounded-3xl max-w-sm w-full p-8 text-center shadow-2xl border border-slate-100 animate-in zoom-in-95 duration-150">
@@ -2418,15 +2483,176 @@ export default function SiswaPanel({
               <Loader2 className="w-8 h-8 animate-spin text-indigo-600" />
             </div>
             <h3 className="text-lg font-black text-slate-900 mb-1.5">
-              Menyimpan ke Database...
+              Mengirim jawaban
             </h3>
             <p className="text-xs text-slate-500 font-medium leading-relaxed mb-4">
-              Mohon tunggu 1–2 detik, sistem sedang mengamankan lembar jawaban dan skor Anda ke database.
+              Mohon tunggu sebentar, jawaban Anda sedang dikirim ke server...
             </p>
             <div className="w-full bg-slate-100 rounded-full h-2 overflow-hidden">
               <div className="bg-indigo-600 h-2 rounded-full animate-pulse w-full" />
             </div>
           </div>
+        </div>
+      )}
+
+      {/* OVERLAY FULLSCREEN: MENGIRIM JAWABAN -> JAWABAN TERKIRIM -> JENDELA HASIL NILAI SISWA */}
+      {submitPhase !== 'idle' && (
+        <div className="fixed inset-0 z-[120] bg-slate-950/85 backdrop-blur-md flex items-center justify-center p-4 animate-in fade-in duration-200">
+          {submitPhase === 'sending' && (
+            <div className="bg-white rounded-3xl max-w-sm w-full p-8 text-center shadow-2xl border border-slate-100 animate-in zoom-in-95 duration-200">
+              <div className="relative w-20 h-20 mx-auto mb-5 flex items-center justify-center">
+                <div className="absolute inset-0 rounded-full border-4 border-indigo-100" />
+                <div className="absolute inset-0 rounded-full border-4 border-indigo-600 border-t-transparent animate-spin" />
+                <Loader2 className="w-8 h-8 text-indigo-600 animate-spin" />
+              </div>
+              <h3 className="text-xl font-black text-slate-900 mb-2">
+                Mengirim jawaban
+              </h3>
+              <p className="text-xs text-slate-500 font-medium leading-relaxed">
+                Mohon tunggu sebentar, sistem sedang mengirim dan mengamankan jawaban Anda...
+              </p>
+            </div>
+          )}
+
+          {submitPhase === 'sent' && (
+            <div className="bg-white rounded-3xl max-w-sm w-full p-8 text-center shadow-2xl border border-emerald-100 animate-in zoom-in-95 duration-200">
+              <div className="w-20 h-20 rounded-full bg-emerald-100 text-emerald-600 flex items-center justify-center mx-auto mb-5 shadow-inner animate-bounce">
+                <CheckCircle className="w-11 h-11 text-emerald-600" />
+              </div>
+              <h3 className="text-xl font-black text-emerald-900 mb-1.5">
+                Jawaban terkirim
+              </h3>
+              <p className="text-xs text-slate-500 font-medium">
+                {examResultData?.syncedToServer
+                  ? 'Seluruh jawaban berhasil tersimpan di server. Menyiapkan hasil ujian...'
+                  : 'Jawaban diamankan di perangkat & siap disinkronkan. Menyiapkan hasil ujian...'}
+              </p>
+            </div>
+          )}
+
+          {submitPhase === 'result' && examResultData && (() => {
+            const { exam: resExam, attempt: resAttempt, syncedToServer } = examResultData;
+            const showScore = resExam.releaseScore !== false;
+            const scoreVal = resAttempt.scorePercentage ?? 0;
+            const isPassed = scoreVal >= resExam.kkm;
+            const answeredCount = Object.keys(resAttempt.answers || {}).filter((k) => {
+              const v = resAttempt.answers[k];
+              if (v === undefined || v === null || v === '') return false;
+              if (Array.isArray(v)) return v.length > 0;
+              if (typeof v === 'object') return Object.keys(v).length > 0;
+              return true;
+            }).length;
+
+            return (
+              <div className="bg-white rounded-3xl max-w-md w-full p-6 sm:p-8 shadow-2xl border border-slate-200 animate-in zoom-in-95 duration-200">
+                <div className="text-center mb-5">
+                  <div className={`w-16 h-16 rounded-2xl flex items-center justify-center mx-auto mb-3 shadow-xs ${
+                    showScore
+                      ? isPassed
+                        ? 'bg-emerald-100 text-emerald-600'
+                        : 'bg-amber-100 text-amber-600'
+                      : 'bg-indigo-100 text-indigo-600'
+                  }`}>
+                    <Award className="w-9 h-9" />
+                  </div>
+                  <span className="inline-block px-3 py-1 rounded-full text-[11px] font-bold bg-indigo-50 text-indigo-700 border border-indigo-200 mb-2">
+                    {resExam.subjectName}
+                  </span>
+                  <h3 className="text-xl font-black text-slate-900 leading-tight">
+                    Hasil Ujian Siswa
+                  </h3>
+                  <p className="text-xs text-slate-500 font-medium mt-0.5">
+                    {resExam.title}
+                  </p>
+                </div>
+
+                {/* Identitas Siswa */}
+                <div className="bg-slate-50 rounded-2xl border border-slate-200 p-4 text-xs space-y-2 mb-4">
+                  <div className="flex justify-between gap-2">
+                    <span className="text-slate-500">Nama Siswa:</span>
+                    <strong className="text-slate-900 text-right">{resAttempt.studentName}</strong>
+                  </div>
+                  <div className="flex justify-between gap-2">
+                    <span className="text-slate-500">NISN / Kelas:</span>
+                    <strong className="text-slate-900 text-right">
+                      {resAttempt.studentNisn || '-'} ({resAttempt.studentClass || '-'})
+                    </strong>
+                  </div>
+                  <div className="flex justify-between gap-2">
+                    <span className="text-slate-500">Soal Terjawab:</span>
+                    <strong className="text-slate-900 text-right">
+                      {answeredCount} dari {resExam.questions.length} Soal
+                    </strong>
+                  </div>
+                  <div className="flex justify-between gap-2 items-center">
+                    <span className="text-slate-500">Status Pengiriman:</span>
+                    {syncedToServer ? (
+                      <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-lg bg-emerald-50 text-emerald-700 border border-emerald-200 font-bold text-[11px]">
+                        <CheckCircle className="w-3 h-3" /> Tersimpan di Server
+                      </span>
+                    ) : (
+                      <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-lg bg-amber-50 text-amber-800 border border-amber-200 font-bold text-[11px]">
+                        Tersimpan Lokal (Menunggu Koneksi)
+                      </span>
+                    )}
+                  </div>
+                </div>
+
+                {/* Kotak Nilai */}
+                <div className={`rounded-2xl border p-5 text-center mb-6 ${
+                  showScore
+                    ? isPassed
+                      ? 'bg-emerald-50 border-emerald-200'
+                      : 'bg-rose-50 border-rose-200'
+                    : 'bg-indigo-50 border-indigo-200'
+                }`}>
+                  {showScore ? (
+                    <>
+                      <span className="text-xs font-bold uppercase tracking-wider text-slate-600 block mb-1">
+                        Nilai Akhir Anda
+                      </span>
+                      <div className={`text-5xl font-black tracking-tight mb-2 ${
+                        isPassed ? 'text-emerald-700' : 'text-rose-700'
+                      }`}>
+                        {scoreVal}
+                      </div>
+                      <span className={`inline-block px-3 py-1 rounded-full text-xs font-extrabold border ${
+                        isPassed
+                          ? 'bg-white text-emerald-700 border-emerald-300'
+                          : 'bg-white text-rose-700 border-rose-300'
+                      }`}>
+                        {isPassed ? `TUNTAS KKM (${resExam.kkm})` : `BELUM TUNTAS (KKM: ${resExam.kkm})`}
+                      </span>
+                    </>
+                  ) : (
+                    <>
+                      <span className="text-xs font-bold uppercase tracking-wider text-indigo-700 block mb-1">
+                        Status Ujian
+                      </span>
+                      <div className="text-2xl font-black text-indigo-900 mb-1">
+                        Nilai Tersimpan
+                      </div>
+                      <p className="text-[11px] text-indigo-700 leading-relaxed">
+                        Nilai resmi telah disimpan oleh guru dan akan diumumkan sesuai jadwal sekolah.
+                      </p>
+                    </>
+                  )}
+                </div>
+
+                <button
+                  type="button"
+                  onClick={handleResultOkLogout}
+                  className="w-full py-3.5 px-6 bg-indigo-600 hover:bg-indigo-700 text-white rounded-2xl font-black text-sm shadow-lg shadow-indigo-600/25 transition cursor-pointer flex items-center justify-center gap-2"
+                >
+                  <LogOut className="w-4 h-4" />
+                  <span>OK</span>
+                </button>
+                <p className="text-[11px] text-slate-400 text-center mt-2.5">
+                  Tekan OK untuk keluar dari mode layar penuh & kembali ke halaman login.
+                </p>
+              </div>
+            );
+          })()}
         </div>
       )}
     </div>

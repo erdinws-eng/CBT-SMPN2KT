@@ -25,8 +25,8 @@ function handleTursoError(action: string, err: any): void {
 }
 
 export const tursoService = {
-  // 0. Ambil seluruh data Turso sekaligus dalam 1 request (Sangat cepat & menjamin sinkron antar browser)
-  async fetchAllCloudData(): Promise<{
+  // 0. Ambil seluruh data Turso sekaligus dalam 1 request (mendukung mode ringan khusus siswa via studentId)
+  async fetchAllCloudData(options?: { studentId?: string }): Promise<{
     settings: SchoolSettings | null;
     users: User[] | null;
     subjects: Subject[] | null;
@@ -34,9 +34,14 @@ export const tursoService = {
     attempts: ExamAttempt[] | null;
     syncedAt?: string;
   } | null> {
+    const studentId = options?.studentId?.trim();
+    const url = studentId
+      ? `/api/turso/data?studentId=${encodeURIComponent(studentId)}`
+      : '/api/turso/data';
+
     // 1. Coba lewat server proxy Turso (Zero-CORS, anti-timeout, multi-browser handal)
     try {
-      const res = await fetch('/api/turso/data');
+      const res = await fetch(url);
       if (res.ok) {
         const data = await res.json();
         if (data.success && data.isConfigured) {
@@ -62,12 +67,15 @@ export const tursoService = {
     try {
       const [settings, users, subjects, exams, attempts] = await Promise.all([
         this.getSchoolSettings(),
-        this.getUsers(),
+        studentId ? Promise.resolve(null) : this.getUsers(),
         this.getSubjects(),
         this.getExams(),
         this.getExamAttempts(),
       ]);
-      return { settings, users, subjects, exams, attempts };
+      const scopedAttempts = studentId && attempts
+        ? attempts.filter((a) => a.studentId === studentId)
+        : attempts;
+      return { settings, users, subjects, exams, attempts: scopedAttempts };
     } catch (err) {
       handleTursoError('fetchAllCloudData', err);
       return null;
@@ -544,17 +552,27 @@ export const tursoService = {
   },
 
   async saveExamAttempt(attempt: ExamAttempt): Promise<boolean> {
-    // 1. Simpan via server proxy untuk replikasi real-time antar browser
+    // 1. Jalur utama tunggal lewat server proxy (menghindari double-write & menunggu konfirmasi akurat)
     try {
-      fetch('/api/turso/save-attempt', {
+      const res = await fetch('/api/turso/save-attempt', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ attempt }),
-      }).catch(() => {});
-    } catch (e) {}
+      });
+      if (res.ok) {
+        const data = await res.json();
+        if (data?.success) {
+          clearTursoAuthError();
+          return true;
+        }
+      }
+    } catch (e) {
+      console.warn('Server proxy save-attempt gagal, mencoba jalur langsung Turso:', e);
+    }
 
+    // 2. Fallback ke client LibSQL langsung hanya jika server proxy gagal
     const client = getTursoClient();
-    if (!client) return true;
+    if (!client) return false;
 
     try {
       const sanitized = {

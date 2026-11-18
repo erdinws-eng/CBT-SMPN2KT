@@ -43,6 +43,12 @@ export default function App() {
   const [currentUser, setCurrentUser] = useState<User | null>(null);
   const [isTursoModalOpen, setIsTursoModalOpen] = useState<boolean>(false);
   const [isDataLoaded, setIsDataLoaded] = useState<boolean>(false);
+  const [isStudentTakingExam, setIsStudentTakingExam] = useState<boolean>(false);
+
+  const currentUserRef = useRef<User | null>(currentUser);
+  useEffect(() => {
+    currentUserRef.current = currentUser;
+  }, [currentUser]);
 
   const prevUsersRef = useRef<User[]>(users);
   const prevSubjectsRef = useRef<Subject[]>(subjects);
@@ -57,7 +63,7 @@ export default function App() {
 
   // Helper untuk menggabungkan attempts server Turso dengan lokal secara konsisten & aman
   const mergeAttemptsHelper = useCallback(
-    (prevAttempts: ExamAttempt[], tursoAttempts: ExamAttempt[]) => {
+    (prevAttempts: ExamAttempt[], tursoAttempts: ExamAttempt[], scopedStudentId?: string) => {
       const deletedExamIds = getDeletedExamIds();
       const deletedAttemptIds = getDeletedAttemptIds();
       deletedExamIds.forEach((id) => deletedExamIdsRef.current.add(id));
@@ -73,9 +79,13 @@ export default function App() {
         serverMap.set(a.id, a);
       });
 
+      const scopedPrev = scopedStudentId
+        ? prevAttempts.filter((a) => a.studentId === scopedStudentId)
+        : prevAttempts;
+
       // Peta attempt submitted lokal untuk menjamin ujian selesai tidak pernah tertimpa
       const localSubmittedMap = new Map<string, ExamAttempt>();
-      prevAttempts.forEach((a) => {
+      scopedPrev.forEach((a) => {
         if (a.status === 'submitted') {
           localSubmittedMap.set(`${a.studentId}_${a.examId}`, a);
         }
@@ -83,7 +93,7 @@ export default function App() {
 
       const merged: ExamAttempt[] = [];
 
-      prevAttempts.forEach((local) => {
+      scopedPrev.forEach((local) => {
         if (deletedAttemptIdsRef.current.has(local.id) || deletedExamIdsRef.current.has(local.examId)) return;
 
         const server = serverMap.get(local.id);
@@ -168,6 +178,9 @@ export default function App() {
       return false;
     }
 
+    const activeUser = currentUserRef.current;
+    const scopedStudentId = activeUser?.role === 'siswa' ? activeUser.id : undefined;
+
     const mutationStampBeforeFetch = lastLocalMutationAtRef.current;
     setIsSyncing(true);
     try {
@@ -175,8 +188,8 @@ export default function App() {
       // Sinkronkan kredensial database Turso dari server
       await syncTursoConfigWithServer();
 
-      // Ambil seluruh snapshot data (settings, users, mapel, exams, attempts) dari Turso
-      const cloud = await tursoService.fetchAllCloudData();
+      // Ambil snapshot data dari Turso (mode ringan khusus siswa agar tidak menarik 282 user & nilai siswa lain)
+      const cloud = await tursoService.fetchAllCloudData({ studentId: scopedStudentId });
 
       // Jika user melakukan mutasi lokal (impor soal, edit jadwal, dll) SAAT fetch berlangsung, jangan timpa state dengan snapshot lama!
       if (lastLocalMutationAtRef.current !== mutationStampBeforeFetch || pendingSavesCountRef.current > 0) {
@@ -225,7 +238,7 @@ export default function App() {
           saveExams(sanitized);
         }
         if (cloud.attempts) {
-          setAttempts((prev) => mergeAttemptsHelper(prev, cloud.attempts || []));
+          setAttempts((prev) => mergeAttemptsHelper(prev, cloud.attempts || [], scopedStudentId));
         }
         setIsDataLoaded(true);
         const timeStr = new Date().toLocaleTimeString('id-ID', { hour: '2-digit', minute: '2-digit', second: '2-digit' });
@@ -282,18 +295,26 @@ export default function App() {
     })();
   }, [handleManualSync]);
 
-  // Polling pintar antar-browser agar seluruh data selalu sinkron di browser lain
+  // Sinkronisasi ringan otomatis saat user baru login
   useEffect(() => {
-    // Polling berkala: setiap 4.5 detik saat login, atau 7 detik di layar login
+    if (currentUser?.id) {
+      handleManualSync(true);
+    }
+  }, [currentUser?.id, handleManualSync]);
+
+  // Polling pintar antar-browser agar seluruh data selalu sinkron di browser lain
+  // Otomatis dijeda saat siswa sedang berada di ruang pengerjaan soal agar tidak membebani server & jaringan
+  useEffect(() => {
+    // Polling berkala: setiap 4.5 detik saat login (di luar ruang ujian), atau 7 detik di layar login
     const intervalMs = currentUser ? 4500 : 7000;
     const syncInterval = setInterval(() => {
-      if (!isFetchingRef.current) {
+      if (!isFetchingRef.current && !isStudentTakingExam) {
         handleManualSync(true);
       }
     }, intervalMs);
 
     const handleFocusOrVisible = () => {
-      if (!document.hidden && !isFetchingRef.current) {
+      if (!document.hidden && !isFetchingRef.current && !isStudentTakingExam) {
         handleManualSync(true);
       }
     };
@@ -302,7 +323,7 @@ export default function App() {
     document.addEventListener('visibilitychange', handleFocusOrVisible);
 
     const handleBroadcast = (event: MessageEvent) => {
-      if (event.data?.type === 'CBT_DATA_MUTATED' && !isFetchingRef.current) {
+      if (event.data?.type === 'CBT_DATA_MUTATED' && !isFetchingRef.current && !isStudentTakingExam) {
         handleManualSync(true);
       }
     };
@@ -340,7 +361,7 @@ export default function App() {
         syncChannel.removeEventListener('message', handleBroadcast);
       }
     };
-  }, [currentUser, handleManualSync]);
+  }, [currentUser, isStudentTakingExam, handleManualSync]);
 
   // Helper broadcast perubahan data ke tab lain
   const notifyMutation = useCallback(() => {
@@ -526,6 +547,12 @@ export default function App() {
   };
 
   const handleLogout = () => {
+    try {
+      if (document.fullscreenElement && document.exitFullscreen) {
+        document.exitFullscreen().catch(() => {});
+      }
+    } catch (e) {}
+    setIsStudentTakingExam(false);
     setCurrentUser(null);
   };
 
@@ -645,6 +672,8 @@ export default function App() {
               settings={settings}
               onUpdateAttempts={handleUpdateAttempts}
               onRefreshData={() => handleManualSync(false)}
+              onLogout={handleLogout}
+              onExamActiveChange={setIsStudentTakingExam}
             />
           )}
         </main>

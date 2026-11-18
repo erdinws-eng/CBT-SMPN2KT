@@ -761,17 +761,20 @@ function getServerTursoClient() {
 }
 
 // 4.1. Ambil seluruh data dari Turso Database untuk sinkronisasi instan antar-browser
-app.get("/api/turso/data", async (_req, res) => {
+// Mendukung parameter opsional ?studentId=... agar perangkat siswa tidak menarik seluruh data user & nilai siswa lain
+app.get("/api/turso/data", async (req, res) => {
   try {
     const client = getServerTursoClient();
     if (!client) {
       return res.json({ success: false, isConfigured: false, message: "Turso belum dikonfigurasi di server." });
     }
 
+    const studentId = typeof req.query.studentId === "string" ? req.query.studentId.trim() : "";
+
     // Ambil semua tabel secara paralel, lacak status keberhasilan agar error sementara tidak menimpa data lokal dengan array kosong
-    const safeQuery = async (sql: string) => {
+    const safeQuery = async (sql: string, args: any[] = []) => {
       try {
-        const result = await client.execute(sql);
+        const result = await client.execute(args.length > 0 ? { sql, args } : sql);
         return { ok: true, rows: result.rows || [] };
       } catch (qErr) {
         console.warn(`Turso query warning (${sql.slice(0, 40)}):`, qErr);
@@ -781,10 +784,14 @@ app.get("/api/turso/data", async (_req, res) => {
 
     const [settingsRes, usersRes, subjectsRes, examsRes, attemptsRes] = await Promise.all([
       safeQuery("SELECT * FROM school_settings WHERE id = 'default_school' LIMIT 1"),
-      safeQuery("SELECT * FROM users ORDER BY created_at ASC"),
+      studentId
+        ? Promise.resolve({ ok: false, rows: [] as any[] })
+        : safeQuery("SELECT * FROM users ORDER BY created_at ASC"),
       safeQuery("SELECT * FROM subjects ORDER BY code ASC"),
       safeQuery("SELECT * FROM exams ORDER BY created_at DESC"),
-      safeQuery("SELECT * FROM exam_attempts ORDER BY started_at DESC"),
+      studentId
+        ? safeQuery("SELECT * FROM exam_attempts WHERE student_id = ? ORDER BY started_at DESC", [studentId])
+        : safeQuery("SELECT * FROM exam_attempts ORDER BY started_at DESC"),
     ]);
 
     let settings = null;
