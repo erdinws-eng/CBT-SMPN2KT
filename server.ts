@@ -501,6 +501,7 @@ app.post("/api/turso/init-schema", async (req, res) => {
         lockdown_browser INTEGER DEFAULT 1,
         max_violations INTEGER DEFAULT 3,
         token TEXT DEFAULT '',
+        token_rotation_minutes INTEGER DEFAULT 0,
         questions TEXT NOT NULL DEFAULT '[]',
         status TEXT NOT NULL DEFAULT 'active',
         is_active INTEGER DEFAULT 1,
@@ -517,6 +518,7 @@ app.post("/api/turso/init-schema", async (req, res) => {
         student_class TEXT DEFAULT '',
         started_at TEXT DEFAULT CURRENT_TIMESTAMP,
         submitted_at TEXT,
+        remaining_seconds INTEGER,
         answers TEXT NOT NULL DEFAULT '{}',
         doubtful_answers TEXT DEFAULT '{}',
         scores TEXT DEFAULT '{}',
@@ -544,6 +546,13 @@ app.post("/api/turso/init-schema", async (req, res) => {
     for (const sql of ddl) {
       await client.execute(sql);
     }
+
+    try {
+      await client.execute("ALTER TABLE exams ADD COLUMN token_rotation_minutes INTEGER DEFAULT 0");
+    } catch {}
+    try {
+      await client.execute("ALTER TABLE exam_attempts ADD COLUMN remaining_seconds INTEGER");
+    } catch {}
 
     return res.json({
       success: true,
@@ -650,15 +659,16 @@ app.post("/api/turso/migrate", async (req, res) => {
     // 5. Batch exams
     let examCount = 0;
     if (Array.isArray(exams)) {
+      await ensureExamTokenColumn(client);
       for (const e of exams) {
         await client.execute({
           sql: `INSERT OR REPLACE INTO exams (
             id, title, subject_id, subject_name, teacher_id, teacher_name,
             target_classes, start_time, end_time, duration_minutes, min_submit_minutes,
             kkm, allow_retake, max_retakes, release_score, randomize_questions,
-            randomize_options, lockdown_browser, max_violations, token, questions,
+            randomize_options, lockdown_browser, max_violations, token, token_rotation_minutes, questions,
             status, is_active
-          ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+          ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
           args: [
             e.id,
             e.title,
@@ -680,6 +690,7 @@ app.post("/api/turso/migrate", async (req, res) => {
             e.lockdownBrowser ? 1 : 0,
             e.maxViolations || 3,
             e.token || "",
+            Number(e.tokenRotationMinutes) || 0,
             JSON.stringify(e.questions || []),
             e.status || "active",
             e.isActive === false ? 0 : 1,
@@ -692,15 +703,20 @@ app.post("/api/turso/migrate", async (req, res) => {
     // 6. Batch attempts
     let attemptCount = 0;
     if (Array.isArray(attempts)) {
+      await ensureAttemptRemainingSecondsColumn(client);
       for (const a of attempts) {
+        const remSec =
+          typeof a.remainingSeconds === "number" && Number.isFinite(a.remainingSeconds)
+            ? Math.max(0, Math.floor(a.remainingSeconds))
+            : null;
         await client.execute({
           sql: `INSERT OR REPLACE INTO exam_attempts (
             id, exam_id, exam_title, subject_name, student_id, student_name,
-            student_nisn, student_class, started_at, submitted_at,
+            student_nisn, student_class, started_at, submitted_at, remaining_seconds,
             answers, doubtful_answers, scores, total_score, max_possible_score,
             total_earned_points, total_max_points, score_percentage, passed_kkm,
             status, violation_count, violation_logs, teacher_feedback, is_graded
-          ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+          ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
           args: [
             a.id,
             a.examId,
@@ -712,6 +728,7 @@ app.post("/api/turso/migrate", async (req, res) => {
             a.studentClass || "",
             a.startedAt || new Date().toISOString(),
             a.submittedAt || null,
+            remSec,
             JSON.stringify(a.answers || {}),
             JSON.stringify(a.doubtfulAnswers || {}),
             JSON.stringify(a.scores || {}),
@@ -758,6 +775,24 @@ function getServerTursoClient() {
   const conf = getStoredTursoConfig();
   if (!conf.isConfigured || !conf.url || !conf.authToken) return null;
   return createLibsqlClient({ url: conf.url, authToken: conf.authToken });
+}
+
+let examTokenColEnsured = false;
+async function ensureExamTokenColumn(client: ReturnType<typeof createLibsqlClient>) {
+  if (examTokenColEnsured) return;
+  try {
+    await client.execute("ALTER TABLE exams ADD COLUMN token_rotation_minutes INTEGER DEFAULT 0");
+  } catch {}
+  examTokenColEnsured = true;
+}
+
+let attemptRemainingColEnsured = false;
+async function ensureAttemptRemainingSecondsColumn(client: ReturnType<typeof createLibsqlClient>) {
+  if (attemptRemainingColEnsured) return;
+  try {
+    await client.execute("ALTER TABLE exam_attempts ADD COLUMN remaining_seconds INTEGER");
+  } catch {}
+  attemptRemainingColEnsured = true;
 }
 
 // 4.1. Ambil seluruh data dari Turso Database untuk sinkronisasi instan antar-browser
@@ -872,6 +907,7 @@ app.get("/api/turso/data", async (req, res) => {
         lockdownBrowser: Boolean(e.lockdown_browser),
         maxViolations: Number(e.max_violations || 3),
         token: String(e.token || ""),
+        tokenRotationMinutes: Number(e.token_rotation_minutes || 0),
         questions,
         status: e.status || "active",
         isActive: Boolean(e.is_active !== 0 && e.status !== "inactive"),
@@ -900,6 +936,10 @@ app.get("/api/turso/data", async (req, res) => {
         studentClass: String(a.student_class || ""),
         startedAt: String(a.started_at),
         submittedAt: a.submitted_at ? String(a.submitted_at) : undefined,
+        remainingSeconds:
+          a.remaining_seconds !== undefined && a.remaining_seconds !== null && !Number.isNaN(Number(a.remaining_seconds))
+            ? Number(a.remaining_seconds)
+            : undefined,
         answers,
         doubtfulAnswers,
         scores,
@@ -982,14 +1022,16 @@ app.post("/api/turso/save-exam", async (req, res) => {
     const { exam } = req.body;
     if (!exam || !exam.id) return res.status(400).json({ success: false, message: "Data ujian tidak valid." });
 
+    await ensureExamTokenColumn(client);
+
     await client.execute({
       sql: `INSERT OR REPLACE INTO exams (
         id, title, subject_id, subject_name, teacher_id, teacher_name,
         target_classes, start_time, end_time, duration_minutes, min_submit_minutes,
         kkm, allow_retake, max_retakes, release_score, randomize_questions,
-        randomize_options, lockdown_browser, max_violations, token, questions,
-        status, is_active, created_at
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        randomize_options, lockdown_browser, max_violations, token, token_rotation_minutes,
+        questions, status, is_active, created_at
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       args: [
         exam.id,
         exam.title,
@@ -1011,6 +1053,7 @@ app.post("/api/turso/save-exam", async (req, res) => {
         exam.lockdownBrowser ? 1 : 0,
         exam.maxViolations || 3,
         exam.token || "",
+        Number(exam.tokenRotationMinutes || 0),
         JSON.stringify(exam.questions || []),
         exam.status || "active",
         exam.isActive === false ? 0 : 1,
@@ -1053,14 +1096,21 @@ app.post("/api/turso/save-attempt", async (req, res) => {
     const { attempt } = req.body;
     if (!attempt || !attempt.id) return res.status(400).json({ success: false, message: "Data attempt tidak valid." });
 
+    await ensureAttemptRemainingSecondsColumn(client);
+
+    const remSec =
+      typeof attempt.remainingSeconds === "number" && Number.isFinite(attempt.remainingSeconds)
+        ? Math.max(0, Math.floor(attempt.remainingSeconds))
+        : null;
+
     await client.execute({
       sql: `INSERT OR REPLACE INTO exam_attempts (
         id, exam_id, exam_title, subject_name, student_id, student_name,
-        student_nisn, student_class, started_at, submitted_at,
+        student_nisn, student_class, started_at, submitted_at, remaining_seconds,
         answers, doubtful_answers, scores, total_score, max_possible_score,
         total_earned_points, total_max_points, score_percentage, passed_kkm,
         status, violation_count, violation_logs, teacher_feedback, is_graded
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       args: [
         attempt.id,
         attempt.examId,
@@ -1072,6 +1122,7 @@ app.post("/api/turso/save-attempt", async (req, res) => {
         attempt.studentClass || "",
         attempt.startedAt || new Date().toISOString(),
         attempt.submittedAt || null,
+        remSec,
         JSON.stringify(attempt.answers || {}),
         JSON.stringify(attempt.doubtfulAnswers || {}),
         JSON.stringify(attempt.scores || {}),

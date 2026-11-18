@@ -47,7 +47,14 @@ import {
   Filter,
   Layers,
   History,
+  Key,
+  Copy,
 } from 'lucide-react';
+import {
+  getExamTokenState,
+  generateRandomTokenCode,
+  formatTokenCountdown,
+} from '../lib/examToken';
 import {
   Exam,
   Question,
@@ -270,6 +277,12 @@ export default function GuruPanel({
   const [newQuestionCorrectOrder, setNewQuestionCorrectOrder] = useState<string[]>([]);
   const [newQuestionExplanation, setNewQuestionExplanation] = useState('');
 
+  const [tokenNowMs, setTokenNowMs] = useState<number>(() => Date.now());
+  useEffect(() => {
+    const timer = setInterval(() => setTokenNowMs(Date.now()), 1000);
+    return () => clearInterval(timer);
+  }, []);
+
   // Create Exam Modal
   const [isCreateExamModalOpen, setIsCreateExamModalOpen] = useState(false);
   const [newExamForm, setNewExamForm] = useState<Partial<Exam>>({
@@ -289,7 +302,8 @@ export default function GuruPanel({
     randomizeOptions: true,
     lockdownBrowser: true,
     maxViolations: 1,
-    token: 'CBT' + Math.floor(1000 + Math.random() * 9000),
+    token: generateRandomTokenCode(6),
+    tokenRotationMinutes: 5,
     status: 'active',
     isActive: true,
   });
@@ -315,6 +329,9 @@ export default function GuruPanel({
     releaseScore: true,
     allowRetake: false,
     maxRetakes: 1,
+    isActive: true,
+    token: '',
+    tokenRotationMinutes: 0,
   });
 
   // Edit Question Modal State (CRUD Edit Soal)
@@ -810,6 +827,12 @@ export default function GuruPanel({
             const draftObj = JSON.parse(existingDraftRaw);
             draftObj.violationCount = 0;
             draftObj.status = 'in_progress';
+            if (typeof targetAtt.remainingSeconds === 'number') {
+              draftObj.remainingSeconds =
+                typeof draftObj.remainingSeconds === 'number'
+                  ? Math.min(draftObj.remainingSeconds, targetAtt.remainingSeconds)
+                  : targetAtt.remainingSeconds;
+            }
             localStorage.setItem(draftKey, JSON.stringify(draftObj));
           }
         } catch (e) {}
@@ -927,6 +950,9 @@ export default function GuruPanel({
       releaseScore: exam.releaseScore,
       allowRetake: exam.allowRetake,
       maxRetakes: exam.maxRetakes || 1,
+      isActive: exam.isActive !== false,
+      token: exam.token && exam.token !== 'DIRECT' ? exam.token : generateRandomTokenCode(6),
+      tokenRotationMinutes: Number(exam.tokenRotationMinutes || 0),
     });
     setIsEditExamModalOpen(true);
   };
@@ -939,6 +965,10 @@ export default function GuruPanel({
 
     setIsSavingEditExam(true);
     await new Promise((r) => setTimeout(r, 350));
+
+    const rotationMinutes = Number(editExamForm.tokenRotationMinutes || 0);
+    const cleanedToken = (editExamForm.token || '').trim().toUpperCase();
+    const finalToken = cleanedToken || (rotationMinutes > 0 ? generateRandomTokenCode(6) : 'DIRECT');
 
     const updated = allExams.map((ex) => {
       if (ex.id === editingExam.id) {
@@ -960,6 +990,8 @@ export default function GuruPanel({
           allowRetake: editExamForm.allowRetake,
           maxRetakes: Number(editExamForm.maxRetakes) || 1,
           isActive: editExamForm.isActive !== undefined ? editExamForm.isActive : true,
+          token: finalToken,
+          tokenRotationMinutes: rotationMinutes,
         };
       }
       return ex;
@@ -1160,7 +1192,10 @@ export default function GuruPanel({
       randomizeOptions: Boolean(newExamForm.randomizeOptions),
       lockdownBrowser: Boolean(newExamForm.lockdownBrowser),
       maxViolations: Number(newExamForm.maxViolations) || 3,
-      token: 'DIRECT',
+      token:
+        (newExamForm.token || '').trim().toUpperCase() ||
+        (Number(newExamForm.tokenRotationMinutes || 0) > 0 ? generateRandomTokenCode(6) : 'DIRECT'),
+      tokenRotationMinutes: Number(newExamForm.tokenRotationMinutes || 0),
       status: 'active',
       isActive: true, // Exams are active by default
       createdAt: new Date().toISOString(),
@@ -1700,7 +1735,7 @@ export default function GuruPanel({
                                 <h4 className="text-sm font-bold text-slate-900 truncate">
                                   {exam.title}
                                 </h4>
-                                <div className="flex flex-wrap items-center gap-x-3 text-[11px] text-slate-500 mt-1">
+                                <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-[11px] text-slate-500 mt-1">
                                   <span>Durasi: {exam.durationMinutes} mnt</span>
                                   <span>•</span>
                                   <span>KKM: {exam.kkm}</span>
@@ -1708,6 +1743,24 @@ export default function GuruPanel({
                                   <span>{qCount} Soal</span>
                                   <span>•</span>
                                   <span>{attCount} Peserta</span>
+                                  {(() => {
+                                    const tState = getExamTokenState(exam, tokenNowMs);
+                                    if (!tState.requiresToken) return null;
+                                    return (
+                                      <>
+                                        <span>•</span>
+                                        <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md bg-amber-50 text-amber-800 border border-amber-200 font-mono font-bold">
+                                          <Key className="w-3 h-3 text-amber-600" />
+                                          {tState.activeToken}
+                                          {tState.intervalMinutes > 0 && (
+                                            <span className="text-[10px] font-sans font-semibold text-amber-700 ml-1">
+                                              ({formatTokenCountdown(tState.remainingSeconds)})
+                                            </span>
+                                          )}
+                                        </span>
+                                      </>
+                                    );
+                                  })()}
                                 </div>
                               </div>
 
@@ -2029,7 +2082,7 @@ export default function GuruPanel({
                         </div>
                       </div>
 
-                      <div className="space-y-1 text-xs text-slate-500 mb-4">
+                      <div className="space-y-1 text-xs text-slate-500 mb-3">
                         <div className="flex items-center gap-1.5">
                           <Calendar className="w-3.5 h-3.5 text-slate-400" />
                           <span>Mulai: {new Date(exam.startTime).toLocaleString('id-ID')}</span>
@@ -2042,6 +2095,64 @@ export default function GuruPanel({
                           Kelas Sasaran: <strong>{exam.targetClasses.join(', ')}</strong> • Total Soal: <strong>{count} butir</strong>
                         </div>
                       </div>
+
+                      {/* Live Token Ujian Otomatis */}
+                      {(() => {
+                        const tState = getExamTokenState(exam, tokenNowMs);
+                        return (
+                          <div className={`p-3 rounded-xl border mb-4 ${
+                            tState.requiresToken
+                              ? 'bg-amber-50/80 border-amber-200'
+                              : 'bg-slate-50 border-slate-200'
+                          }`}>
+                            <div className="flex items-center justify-between gap-2">
+                              <div>
+                                <span className="text-[10px] font-bold uppercase tracking-wider text-slate-500 flex items-center gap-1">
+                                  <Key className="w-3 h-3 text-amber-600" />
+                                  <span>
+                                    {tState.requiresToken
+                                      ? tState.intervalMinutes > 0
+                                        ? `Token Aktif (Berubah tiap ${tState.intervalMinutes} mnt)`
+                                        : 'Token Ujian (Tetap)'
+                                      : 'Tanpa Token (Akses Langsung)'}
+                                  </span>
+                                </span>
+                                {tState.requiresToken ? (
+                                  <div className="flex items-center gap-2 mt-1">
+                                    <span className="font-mono text-lg font-black tracking-widest text-amber-900">
+                                      {tState.activeToken}
+                                    </span>
+                                    {tState.intervalMinutes > 0 && (
+                                      <span className="text-[11px] font-bold text-amber-700 bg-white px-2 py-0.5 rounded-lg border border-amber-200">
+                                        {formatTokenCountdown(tState.remainingSeconds)}
+                                      </span>
+                                    )}
+                                  </div>
+                                ) : (
+                                  <span className="text-[11px] text-slate-500 block mt-0.5">
+                                    Klik Edit untuk mengaktifkan token interval 5/10/15 menit.
+                                  </span>
+                                )}
+                              </div>
+
+                              {tState.requiresToken && (
+                                <button
+                                  type="button"
+                                  onClick={() => {
+                                    navigator.clipboard?.writeText(tState.activeToken).catch(() => {});
+                                    showToast('Token Disalin', `Token "${tState.activeToken}" disalin ke clipboard.`, 'success');
+                                  }}
+                                  className="px-2.5 py-1.5 bg-white hover:bg-amber-100 text-amber-800 border border-amber-200 rounded-lg text-[11px] font-bold flex items-center gap-1 cursor-pointer shrink-0"
+                                  title="Salin Token Aktif"
+                                >
+                                  <Copy className="w-3.5 h-3.5" />
+                                  <span>Salin</span>
+                                </button>
+                              )}
+                            </div>
+                          </div>
+                        );
+                      })()}
                     </div>
 
                     <div className="pt-3 border-t border-slate-100 flex flex-wrap items-center justify-between gap-2">
@@ -4099,6 +4210,69 @@ export default function GuruPanel({
                 </div>
               </div>
 
+              {/* Keamanan Token Ujian & Rotasi Otomatis */}
+              <div className="p-3.5 bg-amber-50/70 rounded-xl border border-amber-200 space-y-3">
+                <div className="flex items-center justify-between">
+                  <span className="font-bold text-amber-950 text-xs flex items-center gap-1.5">
+                    <Key className="w-4 h-4 text-amber-600" />
+                    <span>Keamanan Token Ujian (Berubah Otomatis)</span>
+                  </span>
+                </div>
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                  <div>
+                    <label className="block text-[11px] font-bold text-slate-700 mb-1">
+                      Interval Pergantian Token
+                    </label>
+                    <select
+                      value={Number(newExamForm.tokenRotationMinutes || 0)}
+                      onChange={(e) =>
+                        setNewExamForm({
+                          ...newExamForm,
+                          tokenRotationMinutes: Number(e.target.value),
+                        })
+                      }
+                      className="w-full p-2.5 bg-white border border-amber-200 rounded-xl text-xs font-semibold text-slate-800"
+                    >
+                      <option value={5}>Berubah tiap 5 Menit</option>
+                      <option value={10}>Berubah tiap 10 Menit</option>
+                      <option value={15}>Berubah tiap 15 Menit</option>
+                      <option value={0}>Token Tetap (Tidak Berubah)</option>
+                    </select>
+                  </div>
+                  <div>
+                    <label className="block text-[11px] font-bold text-slate-700 mb-1">
+                      Kode Dasar Token (Kosongkan = Tanpa Token jika Tetap)
+                    </label>
+                    <div className="flex gap-1.5">
+                      <input
+                        type="text"
+                        value={newExamForm.token || ''}
+                        onChange={(e) =>
+                          setNewExamForm({ ...newExamForm, token: e.target.value.toUpperCase() })
+                        }
+                        placeholder="MISAL: CBT8A"
+                        className="w-full p-2.5 bg-white border border-amber-200 rounded-xl font-mono text-xs uppercase font-bold"
+                      />
+                      <button
+                        type="button"
+                        onClick={() =>
+                          setNewExamForm({ ...newExamForm, token: generateRandomTokenCode(6) })
+                        }
+                        className="px-2.5 bg-amber-100 hover:bg-amber-200 text-amber-800 rounded-xl text-[11px] font-bold shrink-0 cursor-pointer"
+                        title="Acak Kode Dasar"
+                      >
+                        Acak
+                      </button>
+                    </div>
+                  </div>
+                </div>
+                {Number(newExamForm.tokenRotationMinutes || 0) > 0 && (
+                  <p className="text-[11px] text-amber-800">
+                    Token aktif otomatis berganti setiap <strong>{newExamForm.tokenRotationMinutes} menit</strong> dan selalu ditampilkan secara live di kartu jadwal ujian untuk dibagikan pengawas ke siswa.
+                  </p>
+                )}
+              </div>
+
               {/* Toggles & Options */}
               <div className="p-3 bg-slate-50 rounded-xl border border-slate-200 space-y-2.5">
                 <span className="font-bold text-slate-800 block mb-1">Pengaturan Tambahan Ujian:</span>
@@ -4784,6 +4958,80 @@ export default function GuruPanel({
                     className="w-full p-2.5 bg-slate-50 border border-slate-300 rounded-xl font-mono"
                     required
                   />
+                </div>
+              </div>
+
+              {/* Keamanan Token Ujian & Rotasi Otomatis */}
+              <div className="p-3.5 bg-amber-50/70 rounded-xl border border-amber-200 space-y-3">
+                <div className="flex items-center justify-between">
+                  <span className="font-bold text-amber-950 text-xs flex items-center gap-1.5">
+                    <Key className="w-4 h-4 text-amber-600" />
+                    <span>Keamanan Token Ujian (Berubah Otomatis)</span>
+                  </span>
+                  {(() => {
+                    const previewState = getExamTokenState(
+                      {
+                        id: editingExam.id,
+                        token: editExamForm.token,
+                        tokenRotationMinutes: editExamForm.tokenRotationMinutes,
+                      },
+                      tokenNowMs
+                    );
+                    if (!previewState.requiresToken) return null;
+                    return (
+                      <span className="px-2 py-0.5 rounded-lg bg-white border border-amber-300 font-mono text-xs font-black text-amber-900">
+                        Aktif: {previewState.activeToken}
+                      </span>
+                    );
+                  })()}
+                </div>
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                  <div>
+                    <label className="block text-[11px] font-bold text-slate-700 mb-1">
+                      Interval Pergantian Token
+                    </label>
+                    <select
+                      value={Number(editExamForm.tokenRotationMinutes || 0)}
+                      onChange={(e) =>
+                        setEditExamForm({
+                          ...editExamForm,
+                          tokenRotationMinutes: Number(e.target.value),
+                        })
+                      }
+                      className="w-full p-2.5 bg-white border border-amber-200 rounded-xl text-xs font-semibold text-slate-800"
+                    >
+                      <option value={5}>Berubah tiap 5 Menit</option>
+                      <option value={10}>Berubah tiap 10 Menit</option>
+                      <option value={15}>Berubah tiap 15 Menit</option>
+                      <option value={0}>Token Tetap / Nonaktif</option>
+                    </select>
+                  </div>
+                  <div>
+                    <label className="block text-[11px] font-bold text-slate-700 mb-1">
+                      Kode Token (Isi "DIRECT" / kosong jika tanpa token tetap)
+                    </label>
+                    <div className="flex gap-1.5">
+                      <input
+                        type="text"
+                        value={editExamForm.token}
+                        onChange={(e) =>
+                          setEditExamForm({ ...editExamForm, token: e.target.value.toUpperCase() })
+                        }
+                        placeholder="MISAL: CBT8A"
+                        className="w-full p-2.5 bg-white border border-amber-200 rounded-xl font-mono text-xs uppercase font-bold"
+                      />
+                      <button
+                        type="button"
+                        onClick={() =>
+                          setEditExamForm({ ...editExamForm, token: generateRandomTokenCode(6) })
+                        }
+                        className="px-2.5 bg-amber-100 hover:bg-amber-200 text-amber-800 rounded-xl text-[11px] font-bold shrink-0 cursor-pointer"
+                        title="Acak Token Baru"
+                      >
+                        Acak
+                      </button>
+                    </div>
+                  </div>
                 </div>
               </div>
 

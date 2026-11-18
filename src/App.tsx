@@ -44,6 +44,7 @@ export default function App() {
   const [isTursoModalOpen, setIsTursoModalOpen] = useState<boolean>(false);
   const [isDataLoaded, setIsDataLoaded] = useState<boolean>(false);
   const [isStudentTakingExam, setIsStudentTakingExam] = useState<boolean>(false);
+  const [logoutNotice, setLogoutNotice] = useState<string>('');
 
   const currentUserRef = useRef<User | null>(currentUser);
   useEffect(() => {
@@ -123,7 +124,21 @@ export default function App() {
           }
           // 2. Siswa terkena pelanggaran dan Guru baru saja klik "Lanjutkan" di panel pengawas:
           else if (local.status === 'violation_disqualified' && server.status === 'in_progress') {
-            merged.push(server);
+            let hasUnsentViolation = false;
+            try {
+              hasUnsentViolation = Boolean(localStorage.getItem(`cbt_pending_attempt_${local.id}`));
+            } catch (e) {}
+            if (hasUnsentViolation) {
+              // Pelanggaran baru terjadi dan belum sempat terkirim ke server: PERTAHANKAN kunci pelanggaran!
+              merged.push(local);
+              unifiedDbService.saveExamAttempt(local);
+            } else {
+              // Pelanggaran sudah masuk server sebelumnya & guru sudah menekan "Lanjutkan": buka kunci!
+              try {
+                localStorage.removeItem(`cbt_violation_lock_${local.studentId}_${local.examId}`);
+              } catch (e) {}
+              merged.push(server);
+            }
           }
           // 3. Guru mengumpulkan paksa ujian siswa dari panel live monitoring:
           else if (local.status === 'in_progress' && server.status === 'submitted') {
@@ -546,15 +561,16 @@ export default function App() {
     }
   };
 
-  const handleLogout = () => {
+  const handleLogout = useCallback((reason?: string) => {
     try {
       if (document.fullscreenElement && document.exitFullscreen) {
         document.exitFullscreen().catch(() => {});
       }
     } catch (e) {}
+    setLogoutNotice(typeof reason === 'string' ? reason : '');
     setIsStudentTakingExam(false);
     setCurrentUser(null);
-  };
+  }, []);
 
   const isTursoConfigured = isCloudDbConfigured();
 
@@ -574,12 +590,14 @@ export default function App() {
           users={users}
           settings={settings}
           onLoginSuccess={(user) => {
+            setLogoutNotice('');
             setCurrentUser(user);
           }}
           onOpenTursoModal={() => setIsTursoModalOpen(true)}
           onSyncDatabase={() => handleManualSync(false)}
           isSyncing={isSyncing}
           lastSyncedTime={lastSyncedTime}
+          logoutNotice={logoutNotice}
         />
         <TursoConfigModal
           isOpen={isTursoModalOpen}
@@ -672,7 +690,8 @@ export default function App() {
               settings={settings}
               onUpdateAttempts={handleUpdateAttempts}
               onRefreshData={() => handleManualSync(false)}
-              onLogout={handleLogout}
+              onLogout={() => handleLogout()}
+              onAutoLogout={(reason) => handleLogout(reason)}
               onExamActiveChange={setIsStudentTakingExam}
             />
           )}

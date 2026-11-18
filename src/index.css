@@ -25,16 +25,34 @@ html, body {
   -webkit-user-select: none !important;
   -moz-user-select: none !important;
   -ms-user-select: none !important;
+  -webkit-touch-callout: none !important;
+}
+
+.cbt-lockdown * {
+  user-select: none !important;
+  -webkit-user-select: none !important;
+  -webkit-touch-callout: none !important;
+}
+
+.cbt-lockdown input,
+.cbt-lockdown textarea {
+  user-select: text !important;
+  -webkit-user-select: text !important;
 }
 
 .cbt-lockdown img,
 .cbt-lockdown video {
   pointer-events: none !important;
   -webkit-user-drag: none !important;
+  user-drag: none !important;
 }
 
 /* Print Optimization for School Grade Reports & Transcripts */
 @media print {
+  #cbt-exam-room {
+    display: none !important;
+    visibility: hidden !important;
+  }
   body {
     background: #ffffff !important;
     color: #000000 !important;

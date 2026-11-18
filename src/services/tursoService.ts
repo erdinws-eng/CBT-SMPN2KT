@@ -367,6 +367,7 @@ export const tursoService = {
           lockdownBrowser: Boolean(row.lockdown_browser),
           maxViolations: Number(row.max_violations || 3),
           token: String(row.token || ''),
+          tokenRotationMinutes: Number(row.token_rotation_minutes || 0),
           questions,
           status: row.status as 'draft' | 'active' | 'finished',
           isActive: Boolean(row.is_active !== 0 && row.status !== 'inactive'),
@@ -408,14 +409,14 @@ export const tursoService = {
           id, title, subject_id, subject_name, teacher_id, teacher_name,
           target_classes, start_time, end_time, duration_minutes, min_submit_minutes,
           kkm, allow_retake, max_retakes, release_score, randomize_questions,
-          randomize_options, lockdown_browser, max_violations, token, questions,
-          status, is_active
+          randomize_options, lockdown_browser, max_violations, token, token_rotation_minutes,
+          questions, status, is_active
         ) VALUES (
           ?, ?, ?, ?, ?, ?,
           ?, ?, ?, ?, ?,
           ?, ?, ?, ?, ?,
           ?, ?, ?, ?, ?,
-          ?, ?
+          ?, ?, ?
         )`,
         args: [
           exam.id,
@@ -438,6 +439,7 @@ export const tursoService = {
           exam.lockdownBrowser ? 1 : 0,
           exam.maxViolations || 3,
           exam.token || '',
+          Number(exam.tokenRotationMinutes || 0),
           JSON.stringify(exam.questions || []),
           exam.status,
           exam.isActive === false ? 0 : 1,
@@ -529,6 +531,10 @@ export const tursoService = {
           studentClass: String(row.student_class || ''),
           startedAt: String(row.started_at),
           submittedAt: row.submitted_at ? String(row.submitted_at) : undefined,
+          remainingSeconds:
+            row.remaining_seconds !== null && row.remaining_seconds !== undefined && !Number.isNaN(Number(row.remaining_seconds))
+              ? Number(row.remaining_seconds)
+              : undefined,
           answers,
           doubtfulAnswers,
           scores,
@@ -551,13 +557,16 @@ export const tursoService = {
     }
   },
 
-  async saveExamAttempt(attempt: ExamAttempt): Promise<boolean> {
+  async saveExamAttempt(attempt: ExamAttempt, options?: { keepalive?: boolean }): Promise<boolean> {
     // 1. Jalur utama tunggal lewat server proxy (menghindari double-write & menunggu konfirmasi akurat)
     try {
+      const bodyStr = JSON.stringify({ attempt });
+      const useKeepalive = Boolean(options?.keepalive && bodyStr.length < 60000);
       const res = await fetch('/api/turso/save-attempt', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ attempt }),
+        body: bodyStr,
+        keepalive: useKeepalive,
       });
       if (res.ok) {
         const data = await res.json();
@@ -586,6 +595,10 @@ export const tursoService = {
         student_class: String(attempt.studentClass || ''),
         started_at: attempt.startedAt || new Date().toISOString(),
         submitted_at: attempt.submittedAt || (attempt.status === 'submitted' || attempt.status === 'violation_disqualified' ? new Date().toISOString() : null),
+        remaining_seconds:
+          typeof attempt.remainingSeconds === 'number' && Number.isFinite(attempt.remainingSeconds)
+            ? Math.max(0, Math.floor(attempt.remainingSeconds))
+            : null,
         answers: JSON.stringify(attempt.answers || {}),
         doubtful_answers: JSON.stringify(attempt.doubtfulAnswers || {}),
         scores: JSON.stringify(attempt.scores || {}),
@@ -602,16 +615,20 @@ export const tursoService = {
         is_graded: attempt.isGraded ? 1 : 0,
       };
 
+      try {
+        await client.execute('ALTER TABLE exam_attempts ADD COLUMN remaining_seconds INTEGER');
+      } catch {}
+
       await client.execute({
         sql: `INSERT OR REPLACE INTO exam_attempts (
           id, exam_id, exam_title, subject_name, student_id, student_name,
-          student_nisn, student_class, started_at, submitted_at,
+          student_nisn, student_class, started_at, submitted_at, remaining_seconds,
           answers, doubtful_answers, scores, total_score, max_possible_score,
           total_earned_points, total_max_points, score_percentage, passed_kkm,
           status, violation_count, violation_logs, teacher_feedback, is_graded
         ) VALUES (
           ?, ?, ?, ?, ?, ?,
-          ?, ?, ?, ?,
+          ?, ?, ?, ?, ?,
           ?, ?, ?, ?, ?,
           ?, ?, ?, ?,
           ?, ?, ?, ?, ?
@@ -627,6 +644,7 @@ export const tursoService = {
           sanitized.student_class,
           sanitized.started_at,
           sanitized.submitted_at,
+          sanitized.remaining_seconds,
           sanitized.answers,
           sanitized.doubtful_answers,
           sanitized.scores,

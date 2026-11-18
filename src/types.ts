@@ -83,6 +83,7 @@ export interface Exam {
   lockdownBrowser: boolean; // anti-curang lockdown mode
   maxViolations: number; // default 3 strikes before auto-submission
   token: string; // e.g. "SMP8IPA"
+  tokenRotationMinutes?: number; // 0 = statis, 5 / 10 / 15 = rotasi otomatis per menit
   questions: Question[];
   status: 'draft' | 'active' | 'finished';
   createdAt: string;
@@ -104,6 +105,7 @@ export interface ExamAttempt {
   studentClass: string;
   startedAt: string;
   submittedAt?: string;
+  remainingSeconds?: number; // sisa waktu ujian terakhir (detik) agar lanjut tepat dari menit terakhir
   // student answers:
   // - pilihan_ganda: string (e.g. "A. Mitokondria")
   // - pilihan_ganda_kompleks: string[]

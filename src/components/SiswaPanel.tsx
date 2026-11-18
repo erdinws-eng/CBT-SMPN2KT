@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef } from 'react';
+import { useState, useEffect, useRef, type FormEvent } from 'react';
 import confetti from 'canvas-confetti';
 import Xarrow, { Xwrapper } from 'react-xarrows';
 import {
@@ -31,6 +31,7 @@ import {
   Info,
   LayoutGrid,
   LogOut,
+  Key,
 } from 'lucide-react';
 import {
   Exam,
@@ -43,6 +44,7 @@ import {
 import { saveAttempts } from '../lib/storage';
 import { tursoService } from '../services/tursoService';
 import { isCloudDbConfigured } from '../services/unifiedDbService';
+import { getExamTokenState, verifyExamToken } from '../lib/examToken';
 
 interface SiswaPanelProps {
   currentUser: User;
@@ -52,6 +54,7 @@ interface SiswaPanelProps {
   onUpdateAttempts: (attempts: ExamAttempt[]) => void;
   onRefreshData?: () => Promise<void>;
   onLogout?: () => void;
+  onAutoLogout?: (reason: string) => void;
   onExamActiveChange?: (isActive: boolean) => void;
 }
 
@@ -63,6 +66,7 @@ export default function SiswaPanel({
   onUpdateAttempts,
   onRefreshData,
   onLogout,
+  onAutoLogout,
   onExamActiveChange,
 }: SiswaPanelProps) {
   // Layout state
@@ -78,6 +82,9 @@ export default function SiswaPanel({
   const [userAnswers, setUserAnswers] = useState<Record<string, any>>({});
   const [doubtQuestions, setDoubtQuestions] = useState<Record<string, boolean>>({});
   const [remainingSeconds, setRemainingSeconds] = useState<number>(0);
+  const remainingSecondsRef = useRef<number>(0);
+  const userAnswersRef = useRef<Record<string, any>>({});
+  const doubtQuestionsRef = useRef<Record<string, boolean>>({});
   const [isSubmitConfirmOpen, setIsSubmitConfirmOpen] = useState<boolean>(false);
   const [isSubmittingExam, setIsSubmittingExam] = useState<boolean>(false);
   const isSubmittingRef = useRef<boolean>(false);
@@ -92,11 +99,15 @@ export default function SiswaPanel({
   const [isQuestionListOpen, setIsQuestionListOpen] = useState<boolean>(true);
   const [isCheckingPermission, setIsCheckingPermission] = useState<boolean>(false);
 
-  // Anti-cheat state
+  // Anti-cheat & token gate state
   const [violationCount, setViolationCount] = useState<number>(0);
   const [violationWarningModal, setViolationWarningModal] = useState<string | null>(null);
   const [isFullScreen, setIsFullScreen] = useState<boolean>(false);
   const [selectedDomainItem, setSelectedDomainItem] = useState<string | null>(null);
+  const [pendingTokenExam, setPendingTokenExam] = useState<Exam | null>(null);
+  const [tokenInput, setTokenInput] = useState<string>('');
+  const [tokenError, setTokenError] = useState<string>('');
+  const [isPrivacyBlackout, setIsPrivacyBlackout] = useState<boolean>(false);
 
   // Wake lock ref
   const wakeLockRef = useRef<any>(null);
@@ -109,18 +120,68 @@ export default function SiswaPanel({
     };
   }, [activeExam, onExamActiveChange]);
 
+  // Keamanan Sesi: Jika siswa menyembunyikan browser / pindah tab saat di Beranda / Riwayat / Hasil,
+  // otomatis logout sehingga wajib login ulang dengan username & password.
+  useEffect(() => {
+    const flushNonLockdownProgress = () => {
+      if (!activeExam || activeExam.lockdownBrowser || currentAttempt?.status !== 'in_progress' || submitPhase !== 'idle') {
+        return;
+      }
+      saveActiveProgressToLocal({
+        answers: userAnswersRef.current,
+        doubtQuestions: doubtQuestionsRef.current,
+        remainingSeconds: remainingSecondsRef.current,
+      });
+      try {
+        const checkpointAttempt: ExamAttempt = {
+          ...currentAttempt,
+          answers: userAnswersRef.current || {},
+          doubtfulAnswers: doubtQuestionsRef.current || {},
+          remainingSeconds: remainingSecondsRef.current,
+        };
+        tursoService.saveExamAttempt(checkpointAttempt, { keepalive: true });
+      } catch (e) {}
+    };
+
+    const handleStudentHideLogout = () => {
+      if (!document.hidden) return;
+      // Jika sedang dalam ujian lockdown aktif, biarkan handler anti-cheat mengunci & menyimpan dulu
+      if (activeExam && activeExam.lockdownBrowser && currentAttempt?.status === 'in_progress' && submitPhase === 'idle') {
+        return;
+      }
+      // Jangan memotong di tengah proses sending 1 detik (data sudah aman di cbt_pending_attempt_)
+      if (submitPhase === 'sending') return;
+
+      flushNonLockdownProgress();
+
+      onAutoLogout?.(
+        'Sesi Anda otomatis berakhir karena browser disembunyikan atau Anda berpindah tab. Silakan login ulang dengan username dan password.'
+      );
+    };
+
+    document.addEventListener('visibilitychange', handleStudentHideLogout);
+    window.addEventListener('pagehide', flushNonLockdownProgress);
+    window.addEventListener('beforeunload', flushNonLockdownProgress);
+    return () => {
+      document.removeEventListener('visibilitychange', handleStudentHideLogout);
+      window.removeEventListener('pagehide', flushNonLockdownProgress);
+      window.removeEventListener('beforeunload', flushNonLockdownProgress);
+    };
+  }, [activeExam, currentAttempt, submitPhase, onAutoLogout]);
+
   // Filter exams for student's class
   const studentClass = currentUser.classGrade || '8A';
   const myExams = exams.filter(
     (e) => (e.targetClasses.includes(studentClass) || e.targetClasses.includes('all')) && e.isActive !== false
   );
 
-  // Calculate elapsed exam time for minimum submit check
-  const [elapsedMinutes, setElapsedMinutes] = useState<number>(0);
-
   // Kunci storage untuk progres pengerjaan ujian aktif siswa di perangkat ini
   const getProgressStorageKey = (studentId: string, examId: string) =>
     `cbt_exam_progress_${studentId}_${examId}`;
+
+  // Kunci permanen lokal saat siswa terkunci pelanggaran agar refresh browser tidak bisa membuka soal kembali
+  const getViolationLockKey = (studentId: string, examId: string) =>
+    `cbt_violation_lock_${studentId}_${examId}`;
 
   // Helper menyimpan progres ujian aktif ke localStorage secara realtime
   const saveActiveProgressToLocal = (partial: {
@@ -138,7 +199,11 @@ export default function SiswaPanel({
       if (partial.answers !== undefined) data.answers = partial.answers;
       if (partial.doubtQuestions !== undefined) data.doubtQuestions = partial.doubtQuestions;
       if (partial.currentQuestionIndex !== undefined) data.currentQuestionIndex = partial.currentQuestionIndex;
-      if (partial.remainingSeconds !== undefined) data.remainingSeconds = partial.remainingSeconds;
+      if (partial.remainingSeconds !== undefined) {
+        data.remainingSeconds = partial.remainingSeconds;
+      } else if (typeof data.remainingSeconds !== 'number') {
+        data.remainingSeconds = remainingSecondsRef.current;
+      }
       if (partial.violationCount !== undefined) data.violationCount = partial.violationCount;
       data.lastSavedAt = new Date().toISOString();
       localStorage.setItem(key, JSON.stringify(data));
@@ -185,6 +250,18 @@ export default function SiswaPanel({
         // Jika ujian sudah pernah diserahkan (submitted), JANGAN PERNAH membuat draf pengerjaan lagi
         if (submittedExamIds.has(att.examId)) return;
 
+        // Jika masih ada antrean pelanggaran lokal yang belum terkirim untuk attempt ini, JANGAN anggap sudah diizinkan guru
+        let hasUnsentViolation = false;
+        try {
+          hasUnsentViolation = Boolean(localStorage.getItem(`cbt_pending_attempt_${att.id}`));
+        } catch (e) {}
+        if (hasUnsentViolation) return;
+
+        // Guru benar-benar sudah menekan "Lanjutkan": hapus kunci pelanggaran lokal
+        try {
+          localStorage.removeItem(getViolationLockKey(currentUser.id, att.examId));
+        } catch (e) {}
+
         const key = getProgressStorageKey(currentUser.id, att.examId);
         const raw = localStorage.getItem(key);
         let localData: any = {};
@@ -194,20 +271,36 @@ export default function SiswaPanel({
           } catch (e) {}
         }
 
+        const sameAttemptLocal = !localData.attemptId || localData.attemptId === att.id;
+
         // Tarik jawaban dari database yang tersimpan sebelum pelanggaran
         const mergedAnswers = {
-          ...(localData.answers || {}),
+          ...(sameAttemptLocal ? localData.answers || {} : {}),
           ...(att.answers || {}),
         };
 
+        const localRem =
+          sameAttemptLocal && typeof localData.remainingSeconds === 'number' && Number.isFinite(localData.remainingSeconds)
+            ? localData.remainingSeconds
+            : undefined;
+        const dbRem =
+          typeof att.remainingSeconds === 'number' && Number.isFinite(att.remainingSeconds)
+            ? att.remainingSeconds
+            : undefined;
+        const syncedRemainingSeconds =
+          localRem !== undefined && dbRem !== undefined
+            ? Math.min(localRem, dbRem)
+            : (localRem !== undefined ? localRem : dbRem);
+
         const updatedLocal = {
-          ...localData,
+          ...(sameAttemptLocal ? localData : {}),
           attemptId: att.id,
           examId: att.examId,
           studentId: currentUser.id,
           answers: mergedAnswers,
-          doubtQuestions: localData.doubtQuestions || att.doubtfulAnswers || {},
-          currentQuestionIndex: localData.currentQuestionIndex || 0,
+          doubtQuestions: (sameAttemptLocal && localData.doubtQuestions) || att.doubtfulAnswers || {},
+          currentQuestionIndex: (sameAttemptLocal && localData.currentQuestionIndex) || 0,
+          ...(syncedRemainingSeconds !== undefined ? { remainingSeconds: syncedRemainingSeconds } : {}),
           startedAt: att.startedAt || localData.startedAt || new Date().toISOString(),
           violationCount: 0,
           lastPulledFromDatabaseAt: new Date().toISOString(),
@@ -218,9 +311,15 @@ export default function SiswaPanel({
     });
 
     // Otomatis tutup jendela modal peringatan pelanggaran jika guru sudah mengklik "Lanjutkan"
-    const hasResumedAttempt = attempts.some(
-      (att) => att.studentId === currentUser.id && att.status === 'in_progress' && !submittedExamIds.has(att.examId)
-    );
+    const hasResumedAttempt = attempts.some((att) => {
+      if (att.studentId !== currentUser.id || att.status !== 'in_progress' || submittedExamIds.has(att.examId)) {
+        return false;
+      }
+      try {
+        if (localStorage.getItem(`cbt_pending_attempt_${att.id}`)) return false;
+      } catch (e) {}
+      return true;
+    });
     if (hasResumedAttempt && violationWarningModal) {
       setViolationWarningModal(null);
     }
@@ -269,15 +368,21 @@ export default function SiswaPanel({
     }
   };
 
-  // 1. Enter Exam directly without token
+  // 1. Cek kelayakan & Token Ujian sebelum masuk ruang CBT
   const handleStartExam = (exam: Exam) => {
     // Check existing attempts for this exam
     const studentExamAttempts = attempts.filter(
       (a) => a.examId === exam.id && a.studentId === currentUser.id
     );
 
-    // Utamakan attempt in_progress (hasil guru klik Lanjutkan)
-    const inProgressAttempt = studentExamAttempts.find((a) => a.status === 'in_progress');
+    // Utamakan attempt in_progress (hasil guru klik Lanjutkan, asal tidak ada antrean pelanggaran tertunda)
+    const inProgressAttempt = studentExamAttempts.find((a) => {
+      if (a.status !== 'in_progress') return false;
+      try {
+        if (localStorage.getItem(`cbt_pending_attempt_${a.id}`)) return false;
+      } catch (e) {}
+      return true;
+    });
     const isResumedByTeacher = Boolean(inProgressAttempt);
 
     const sortedAttempts = [...studentExamAttempts].sort(
@@ -296,13 +401,55 @@ export default function SiswaPanel({
       }
     }
 
-    // Cek apakah siswa berstatus terkunci karena pelanggaran (belum diizinkan lanjut oleh guru)
-    const isDisqualified = !isResumedByTeacher && studentExamAttempts.some((a) => a.status === 'violation_disqualified');
+    // Cek apakah siswa berstatus terkunci karena pelanggaran (baik di DB maupun kunci lokal anti-refresh)
+    let hasLocalViolationLock = false;
+    try {
+      hasLocalViolationLock = Boolean(localStorage.getItem(getViolationLockKey(currentUser.id, exam.id)));
+    } catch (e) {}
+    const isDisqualified =
+      !isResumedByTeacher &&
+      (hasLocalViolationLock || studentExamAttempts.some((a) => a.status === 'violation_disqualified'));
 
     if (isDisqualified) {
+      setViolationWarningModal(
+        'Ujian Anda saat ini TERKUNCI karena pelanggaran sebelumnya.\n\nSilakan lapor ke Pengawas/Guru di ruangan ujian agar tombol "Lanjutkan" pada tabel pemantauan diklik.'
+      );
       handleCheckTeacherPermission(exam);
       return;
     }
+
+    // Jika paket ujian memerlukan token (tetap atau rotasi 5/10/15 menit), tampilkan modal verifikasi token
+    const tokenState = getExamTokenState(exam);
+    if (tokenState.requiresToken) {
+      setPendingTokenExam(exam);
+      setTokenInput('');
+      setTokenError('');
+      return;
+    }
+
+    enterExamRoom(exam);
+  };
+
+  const handleVerifyTokenAndEnter = (e: FormEvent) => {
+    e.preventDefault();
+    if (!pendingTokenExam) return;
+
+    if (!verifyExamToken(pendingTokenExam, tokenInput)) {
+      setTokenError(
+        'Token tidak sesuai atau sudah berganti. Silakan lihat/minta token terbaru yang aktif dari Pengawas Ujian.'
+      );
+      return;
+    }
+
+    const target = pendingTokenExam;
+    setPendingTokenExam(null);
+    setTokenInput('');
+    setTokenError('');
+    enterExamRoom(target);
+  };
+
+  const enterExamRoom = (exam: Exam) => {
+    setIsPrivacyBlackout(false);
 
     // Periksa apakah ada draf pengerjaan yang tersimpan di localStorage
     const localKey = getProgressStorageKey(currentUser.id, exam.id);
@@ -345,16 +492,45 @@ export default function SiswaPanel({
       (a) => a.examId === exam.id && a.studentId === currentUser.id && a.status === 'in_progress'
     );
 
+    const isSameLocalAttempt =
+      !dbAttempt || !localProgress?.attemptId || localProgress.attemptId === dbAttempt.id;
+
     const dbAnswers = dbAttempt?.answers || {};
-    const localAnswers = localProgress?.answers || {};
+    const localAnswers = isSameLocalAttempt ? (localProgress?.answers || {}) : {};
     // Tarik dan gabungkan jawaban dari database dengan lokal
     const resumedAnswers = { ...localAnswers, ...dbAnswers };
-    const resumedDoubts = localProgress?.doubtQuestions || dbAttempt?.doubtfulAnswers || {};
-    const resumedIndex = localProgress?.currentQuestionIndex || 0;
-    const resumedSeconds = localProgress?.remainingSeconds !== undefined ? localProgress.remainingSeconds : (exam.durationMinutes * 60);
+    const resumedDoubts =
+      (isSameLocalAttempt ? localProgress?.doubtQuestions : undefined) || dbAttempt?.doubtfulAnswers || {};
+    const resumedIndex = isSameLocalAttempt ? (localProgress?.currentQuestionIndex || 0) : 0;
+
+    // Hitung sisa waktu terakhir secara akurat dari lokal maupun DB agar tidak pernah kembali ke waktu awal (misal 60 menit)
+    const totalDurationSeconds = Math.max(60, (Number(exam.durationMinutes) || 60) * 60);
+    const localRemaining =
+      isSameLocalAttempt &&
+      typeof localProgress?.remainingSeconds === 'number' &&
+      Number.isFinite(localProgress.remainingSeconds)
+        ? Math.max(0, Math.min(totalDurationSeconds, Math.floor(localProgress.remainingSeconds)))
+        : undefined;
+    const dbRemaining =
+      typeof dbAttempt?.remainingSeconds === 'number' && Number.isFinite(dbAttempt.remainingSeconds)
+        ? Math.max(0, Math.min(totalDurationSeconds, Math.floor(dbAttempt.remainingSeconds)))
+        : undefined;
+
+    let resumedSeconds = totalDurationSeconds;
+    if (localRemaining !== undefined && dbRemaining !== undefined) {
+      resumedSeconds = Math.min(localRemaining, dbRemaining);
+    } else if (localRemaining !== undefined) {
+      resumedSeconds = localRemaining;
+    } else if (dbRemaining !== undefined) {
+      resumedSeconds = dbRemaining;
+    }
+    if ((localRemaining !== undefined || dbRemaining !== undefined) && resumedSeconds <= 0) {
+      resumedSeconds = 1;
+    }
+
     const resumedViolations = 0; // Reset ke 0 saat dilanjutkan
-    const attemptId = dbAttempt?.id || localProgress?.attemptId || 'att_' + Date.now();
-    const startedAt = dbAttempt?.startedAt || localProgress?.startedAt || new Date().toISOString();
+    const attemptId = dbAttempt?.id || (isSameLocalAttempt ? localProgress?.attemptId : undefined) || 'att_' + Date.now();
+    const startedAt = dbAttempt?.startedAt || (isSameLocalAttempt ? localProgress?.startedAt : undefined) || new Date().toISOString();
 
     const inMemoryAttempt: ExamAttempt = {
       id: attemptId,
@@ -376,11 +552,12 @@ export default function SiswaPanel({
       status: 'in_progress',
       violationCount: resumedViolations,
       startedAt: startedAt,
+      remainingSeconds: resumedSeconds,
       violationLogs: [],
       isGraded: false,
     };
 
-    // Perbarui draf simpanan di localStorage HP siswa dengan jawaban yang ditarik
+    // Perbarui draf simpanan di localStorage HP siswa dengan jawaban & sisa waktu terakhir
     const updatedProgress = {
       attemptId: attemptId,
       examId: exam.id,
@@ -388,7 +565,7 @@ export default function SiswaPanel({
       questionsOrderIds: questionsOrder.map(q => q.id),
       answers: resumedAnswers,
       doubtQuestions: resumedDoubts,
-      currentQuestionIndex: Math.min(resumedIndex, questionsOrder.length - 1),
+      currentQuestionIndex: Math.min(resumedIndex, Math.max(0, questionsOrder.length - 1)),
       remainingSeconds: resumedSeconds,
       violationCount: 0,
       startedAt: startedAt,
@@ -396,15 +573,18 @@ export default function SiswaPanel({
     };
     localStorage.setItem(localKey, JSON.stringify(updatedProgress));
 
+    remainingSecondsRef.current = resumedSeconds;
+    userAnswersRef.current = resumedAnswers;
+    doubtQuestionsRef.current = resumedDoubts;
+
     // CATATAN: Tidak mengirim attempt in_progress ke Turso / App attempts agar tidak muncul di riwayat guru saat belum selesai
     setActiveExam({ ...exam, questions: questionsOrder });
     setCurrentAttempt(inMemoryAttempt);
     setUserAnswers(resumedAnswers);
     setDoubtQuestions(resumedDoubts);
     setRemainingSeconds(resumedSeconds);
-    setElapsedMinutes(0);
     setViolationCount(resumedViolations);
-    setCurrentQuestionIndex(Math.min(resumedIndex, questionsOrder.length - 1));
+    setCurrentQuestionIndex(Math.min(resumedIndex, Math.max(0, questionsOrder.length - 1)));
     isSubmittingRef.current = false;
     setIsSubmittingExam(false);
     setIsQuestionInfoOpen(false);
@@ -494,12 +674,20 @@ export default function SiswaPanel({
     const handleVisibilityChange = () => {
       if (isSubmittingRef.current) return;
       if (document.hidden) {
-        recordViolation('Meninggalkan tab ujian CBT atau membuka aplikasi lain', true);
+        setIsPrivacyBlackout(true);
+        recordViolation('Meninggalkan tab ujian CBT atau menyembunyikan browser', true);
+        // Otomatis logout sehingga saat siswa kembali ke browser harus login ulang + minta izin & token baru
+        setTimeout(() => {
+          onAutoLogout?.(
+            'Ujian dihentikan & Anda otomatis logout karena menyembunyikan browser atau berpindah tab. Silakan login ulang dengan username & password dan hubungi pengawas.'
+          );
+        }, 120);
       }
     };
 
     const handleWindowBlur = () => {
       if (isSubmittingRef.current) return;
+      setIsPrivacyBlackout(true);
       recordViolation('Kursor atau jendela fokus keluar dari aplikasi CBT', true);
     };
 
@@ -513,20 +701,135 @@ export default function SiswaPanel({
       }
     };
 
-    // Keyboard protection (Ctrl+C, Ctrl+V, Ctrl+U, PrintScreen, F12)
+    // Keyboard protection (Copy, Print, Screenshot, DevTools, Refresh)
+    const triggerScreenshotBlock = (reason: string) => {
+      setIsPrivacyBlackout(true);
+      try {
+        window.getSelection()?.removeAllRanges();
+        navigator.clipboard?.writeText?.('').catch(() => {});
+      } catch (e) {}
+      recordViolation(reason, true);
+    };
+
     const handleKeyDown = (e: KeyboardEvent) => {
       if (isSubmittingRef.current) return;
+      const lower = e.key.toLowerCase();
+
+      // Screenshot / Snipping / Print / DevTools shortcuts
       if (
-        (e.ctrlKey || e.metaKey) &&
-        ['c', 'v', 'u', 'p', 's', 'a'].includes(e.key.toLowerCase())
+        e.key === 'PrintScreen' ||
+        (e.metaKey && e.shiftKey && ['3', '4', '5', 's'].includes(lower)) ||
+        (e.ctrlKey && e.shiftKey && ['i', 'j', 'c', 's'].includes(lower)) ||
+        e.key === 'F12'
       ) {
         e.preventDefault();
-        recordViolation(`Menekan tombol pintasan keyboard terlarang (Ctrl+${e.key.toUpperCase()})`, true);
+        triggerScreenshotBlock('Terdeteksi percobaan mengambil tangkapan layar (Screenshot) atau membuka inspeksi');
+        return;
       }
-      if (e.key === 'PrintScreen' || e.key === 'F12') {
+
+      if ((e.ctrlKey || e.metaKey) && ['c', 'x', 'v', 'u', 'p', 's', 'a', 'r'].includes(lower)) {
         e.preventDefault();
-        recordViolation('Mencoba mengambil tangkapan layar atau membuka inspeksi', true);
+        if (lower === 'r') {
+          recordViolation('Mencoba me-refresh halaman ujian menggunakan pintasan Ctrl+R', true);
+        } else if (lower === 'p') {
+          triggerScreenshotBlock('Mencoba mencetak / menyimpan halaman soal (Ctrl+P)');
+        } else {
+          recordViolation(`Menekan tombol pintasan keyboard terlarang (Ctrl+${e.key.toUpperCase()})`, true);
+        }
+        return;
       }
+
+      if (e.key === 'F5') {
+        e.preventDefault();
+        recordViolation('Mencoba me-refresh halaman ujian menggunakan tombol F5', true);
+      }
+    };
+
+    const handleKeyUp = (e: KeyboardEvent) => {
+      if (isSubmittingRef.current) return;
+      if (e.key === 'PrintScreen') {
+        e.preventDefault();
+        triggerScreenshotBlock('Terdeteksi menekan tombol PrintScreen (Screenshot)');
+      }
+    };
+
+    // Blokir salin, potong, seleksi teks, dan drag gambar soal
+    const handleCopyOrCut = (e: ClipboardEvent) => {
+      if (isSubmittingRef.current) return;
+      const target = e.target as HTMLElement | null;
+      if (target && (target.tagName === 'INPUT' || target.tagName === 'TEXTAREA')) return;
+      e.preventDefault();
+      try {
+        window.getSelection()?.removeAllRanges();
+        e.clipboardData?.setData('text/plain', '');
+      } catch (err) {}
+    };
+
+    const handleSelectOrDragStart = (e: Event) => {
+      if (isSubmittingRef.current) return;
+      const target = e.target as HTMLElement | null;
+      if (target && (target.tagName === 'INPUT' || target.tagName === 'TEXTAREA')) return;
+      e.preventDefault();
+    };
+
+    // Jika siswa memaksa klik tombol Refresh browser / menutup tab di tengah ujian lockdown:
+    // Segera kunci secara lokal & kirim status violation_disqualified dengan keepalive agar tidak bisa lanjut setelah refresh!
+    const handlePageHideOrUnload = () => {
+      if (isSubmittingRef.current) return;
+      isSubmittingRef.current = true;
+      try {
+        const localKey = getProgressStorageKey(currentUser.id, activeExam.id);
+        const rawProgress = localStorage.getItem(localKey);
+        const parsedProgress = rawProgress ? JSON.parse(rawProgress) : null;
+        const latestAnswers = userAnswersRef.current || parsedProgress?.answers || currentAttempt.answers || {};
+        const latestDoubts = doubtQuestionsRef.current || parsedProgress?.doubtQuestions || currentAttempt.doubtfulAnswers || {};
+        const latestRemaining = remainingSecondsRef.current;
+
+        // Pastikan sisa waktu tepat hingga detik terakhir ikut tersimpan di localStorage
+        if (parsedProgress && typeof parsedProgress === 'object') {
+          parsedProgress.answers = latestAnswers;
+          parsedProgress.doubtQuestions = latestDoubts;
+          parsedProgress.remainingSeconds = latestRemaining;
+          parsedProgress.lastSavedAt = new Date().toISOString();
+          localStorage.setItem(localKey, JSON.stringify(parsedProgress));
+        }
+
+        const lockAttempt: ExamAttempt = {
+          ...currentAttempt,
+          status: 'violation_disqualified',
+          answers: latestAnswers,
+          doubtfulAnswers: latestDoubts,
+          remainingSeconds: latestRemaining,
+          submittedAt: new Date().toISOString(),
+          violationCount: Math.max(1, currentAttempt.violationCount || 0),
+          violationLogs: [
+            ...(currentAttempt.violationLogs || []),
+            {
+              timestamp: new Date().toISOString(),
+              reason: 'Me-refresh atau menutup browser saat ujian berlangsung',
+            },
+          ],
+          isGraded: true,
+        };
+
+        localStorage.setItem(
+          getViolationLockKey(currentUser.id, activeExam.id),
+          JSON.stringify({
+            attemptId: lockAttempt.id,
+            lockedAt: new Date().toISOString(),
+            reason: 'Me-refresh atau menutup browser saat ujian berlangsung',
+          })
+        );
+        localStorage.setItem(`cbt_pending_attempt_${lockAttempt.id}`, JSON.stringify(lockAttempt));
+
+        const updatedLocalAttempts = [
+          ...attempts.filter((a) => a.id !== lockAttempt.id),
+          lockAttempt,
+        ];
+        saveAttempts(updatedLocalAttempts);
+
+        tursoService.saveExamAttempt(lockAttempt, { keepalive: true });
+      } catch (e) {}
     };
 
     // Context menu (Right click) protection
@@ -549,6 +852,13 @@ export default function SiswaPanel({
     window.addEventListener('blur', handleWindowBlur);
     document.addEventListener('fullscreenchange', handleFullscreenChange);
     window.addEventListener('keydown', handleKeyDown);
+    window.addEventListener('keyup', handleKeyUp);
+    document.addEventListener('copy', handleCopyOrCut);
+    document.addEventListener('cut', handleCopyOrCut);
+    document.addEventListener('selectstart', handleSelectOrDragStart);
+    document.addEventListener('dragstart', handleSelectOrDragStart);
+    window.addEventListener('pagehide', handlePageHideOrUnload);
+    window.addEventListener('beforeunload', handlePageHideOrUnload);
     window.addEventListener('contextmenu', handleContextMenu);
     document.addEventListener('touchstart', handleTouchStart, { passive: false });
 
@@ -557,43 +867,54 @@ export default function SiswaPanel({
       window.removeEventListener('blur', handleWindowBlur);
       document.removeEventListener('fullscreenchange', handleFullscreenChange);
       window.removeEventListener('keydown', handleKeyDown);
+      window.removeEventListener('keyup', handleKeyUp);
+      document.removeEventListener('copy', handleCopyOrCut);
+      document.removeEventListener('cut', handleCopyOrCut);
+      document.removeEventListener('selectstart', handleSelectOrDragStart);
+      document.removeEventListener('dragstart', handleSelectOrDragStart);
+      window.removeEventListener('pagehide', handlePageHideOrUnload);
+      window.removeEventListener('beforeunload', handlePageHideOrUnload);
       window.removeEventListener('contextmenu', handleContextMenu);
       document.removeEventListener('touchstart', handleTouchStart);
     };
-  }, [activeExam, currentAttempt, submitPhase]);
+  }, [activeExam, currentAttempt, submitPhase, onAutoLogout]);
 
-  // 3. Countdown Timer & Minimum submit check
+  // 3. Countdown Timer & Minimum submit check (tidak ter-reset saat siswa klik jawaban)
   useEffect(() => {
-    if (!activeExam || remainingSeconds <= 0 || currentAttempt?.status !== 'in_progress') {
+    if (!activeExam || currentAttempt?.status !== 'in_progress') {
       return;
     }
 
     const timer = setInterval(() => {
       setRemainingSeconds((prev) => {
         if (prev <= 1) {
+          remainingSecondsRef.current = 0;
+          saveActiveProgressToLocal({ remainingSeconds: 0 });
           clearInterval(timer);
           triggerSubmitExam();
           return 0;
         }
         const next = prev - 1;
-        // Simpan sisa detik waktu ujian ke localStorage setiap 5 detik
-        if (next % 5 === 0 && activeExam) {
-          saveActiveProgressToLocal({ remainingSeconds: next });
-        }
+        remainingSecondsRef.current = next;
+        // Simpan sisa detik tepat setiap 1 detik ke localStorage agar kendala jaringan/browser tidak mengembalikan ke menit awal
+        saveActiveProgressToLocal({ remainingSeconds: next });
         return next;
       });
-
-      setElapsedMinutes((prev) => prev + 1 / 60);
     }, 1000);
 
     return () => clearInterval(timer);
-  }, [activeExam, remainingSeconds, currentAttempt]);
+  }, [activeExam?.id, currentAttempt?.id, currentAttempt?.status]);
 
   // 4. Update Answer for current question (Hanya disimpan di LocalStorage perangkat siswa)
   const handleAnswerSelect = (questionId: string, answer: any) => {
     setUserAnswers((prev) => {
       const updated = { ...prev, [questionId]: answer };
-      saveActiveProgressToLocal({ answers: updated, currentQuestionIndex });
+      userAnswersRef.current = updated;
+      saveActiveProgressToLocal({
+        answers: updated,
+        currentQuestionIndex,
+        remainingSeconds: remainingSecondsRef.current,
+      });
       return updated;
     });
 
@@ -606,7 +927,11 @@ export default function SiswaPanel({
   const handleToggleDoubt = (qId: string) => {
     setDoubtQuestions((prev) => {
       const updated = { ...prev, [qId]: !prev[qId] };
-      saveActiveProgressToLocal({ doubtQuestions: updated });
+      doubtQuestionsRef.current = updated;
+      saveActiveProgressToLocal({
+        doubtQuestions: updated,
+        remainingSeconds: remainingSecondsRef.current,
+      });
       return updated;
     });
   };
@@ -746,6 +1071,7 @@ export default function SiswaPanel({
       scores: {},
       startedAt: currentAttempt?.startedAt || new Date().toISOString(),
       submittedAt: new Date().toISOString(),
+      remainingSeconds: remainingSecondsRef.current,
       scorePercentage: Number.isFinite(scorePercentage) ? scorePercentage : 0,
       totalScore: Number.isFinite(earnedPoints) ? earnedPoints : 0,
       maxPossibleScore: Number.isFinite(totalMaxPoints) ? totalMaxPoints : 100,
@@ -772,7 +1098,7 @@ export default function SiswaPanel({
     saveAttempts(updatedAttempts);
     onUpdateAttempts(updatedAttempts);
 
-    // 2. Simpan permanen ke storage lokal bahwa siswa sudah menyelesaikan ujian ini agar kartu ujian tidak pernah revert
+    // 2. Simpan permanen ke storage lokal bahwa siswa sudah menyelesaikan ujian ini atau terkunci pelanggaran
     if (!isDisqualified) {
       try {
         localStorage.setItem(
@@ -780,13 +1106,27 @@ export default function SiswaPanel({
           JSON.stringify(finalAttempt)
         );
         localStorage.removeItem(getProgressStorageKey(currentUser.id, activeExam.id));
+        localStorage.removeItem(getViolationLockKey(currentUser.id, activeExam.id));
       } catch (e) {}
     } else {
       saveActiveProgressToLocal({
         answers: userAnswers,
+        doubtQuestions,
         currentQuestionIndex,
+        remainingSeconds: remainingSecondsRef.current,
         violationCount: Math.max(1, violationCount),
       });
+      // Kunci permanen di perangkat agar refresh browser tidak membuka soal kembali
+      try {
+        localStorage.setItem(
+          getViolationLockKey(currentUser.id, activeExam.id),
+          JSON.stringify({
+            attemptId: finalAttempt.id,
+            lockedAt: new Date().toISOString(),
+            reason: violationReason || 'Pelanggaran terdeteksi oleh sistem pengawas CBT',
+          })
+        );
+      } catch (e) {}
     }
 
     // 2b. Simpan ke antrean sinkronisasi pending SECARA SINKRON SEBELUM MENCOBA JARINGAN!
@@ -799,7 +1139,7 @@ export default function SiswaPanel({
       );
     } catch (e) {}
 
-    // 3. Jika dihentikan karena pelanggaran: langsung tampilkan modal pelanggaran & sinkron di latar belakang
+    // 3. Jika dihentikan karena pelanggaran: langsung kunci & kirim ke DB segera dengan keepalive (tanpa jitter)
     if (isDisqualified) {
       setActiveExam(null);
       setCurrentAttempt(finalAttempt);
@@ -814,13 +1154,10 @@ export default function SiswaPanel({
 
       (async () => {
         try {
-          const jitter = Math.floor(Math.random() * 600);
-          await new Promise((res) => setTimeout(res, jitter));
-
-          let success = await tursoService.saveExamAttempt(finalAttempt);
+          let success = await tursoService.saveExamAttempt(finalAttempt, { keepalive: true });
           if (!success) {
-            await new Promise((res) => setTimeout(res, 1000));
-            success = await tursoService.saveExamAttempt(finalAttempt);
+            await new Promise((res) => setTimeout(res, 800));
+            success = await tursoService.saveExamAttempt(finalAttempt, { keepalive: true });
           }
           if (success) {
             try {
@@ -931,10 +1268,10 @@ export default function SiswaPanel({
     return `${String(mins).padStart(2, '0')}:${String(secs).padStart(2, '0')}`;
   };
 
-  // Check minimum submit time requirement
-  const minSubmitSeconds = (activeExam?.minSubmitMinutes || 0) * 60;
-  const totalExamDurationSeconds = (activeExam?.durationMinutes || 60) * 60;
-  const elapsedSeconds = totalExamDurationSeconds - remainingSeconds;
+  // Check minimum submit time requirement (berdasarkan waktu pengerjaan berjalan dari total durasi - sisa waktu)
+  const minSubmitSeconds = Math.max(0, (Number(activeExam?.minSubmitMinutes) || 0) * 60);
+  const totalExamDurationSeconds = Math.max(60, (Number(activeExam?.durationMinutes) || 60) * 60);
+  const elapsedSeconds = Math.max(0, totalExamDurationSeconds - remainingSeconds);
   const canSubmitNow = elapsedSeconds >= minSubmitSeconds;
   const remainingSecondsUntilSubmitAllowed = Math.max(0, minSubmitSeconds - elapsedSeconds);
 
@@ -1102,21 +1439,28 @@ export default function SiswaPanel({
                         (a, b) => new Date(b.startedAt).getTime() - new Date(a.startedAt).getTime()
                       )[0];
 
-                      // Cari attempt in_progress (hanya jika dimulai SETELAH submit terakhir atau belum pernah submit)
+                      // Cari attempt in_progress (hanya jika dimulai SETELAH submit terakhir dan tidak punya antrean pelanggaran tertunda)
                       const inProgressAttempt = studentExamAttempts.find((a) => {
                         if (a.status !== 'in_progress') return false;
+                        try {
+                          if (localStorage.getItem(`cbt_pending_attempt_${a.id}`)) return false;
+                        } catch (e) {}
                         if (!latestSubmitted) return true;
                         // Hanya anggap in_progress valid jika dimulai SETELAH submit terakhir (misal remedial aktif)
                         return new Date(a.startedAt).getTime() > new Date(latestSubmitted.submittedAt || latestSubmitted.startedAt).getTime();
                       });
 
                       const hasLocalProgress = !latestSubmitted && Boolean(localStorage.getItem(getProgressStorageKey(currentUser.id, exam.id)));
+                      let hasLocalViolationLock = false;
+                      try {
+                        hasLocalViolationLock = Boolean(localStorage.getItem(getViolationLockKey(currentUser.id, exam.id)));
+                      } catch (e) {}
 
                       // Jika siswa sudah submit: UJIAN SELESAI MUTLAK!
                       const isFinished = Boolean(latestSubmitted);
-                      const isDisqualified = !isFinished && Boolean(latestDisqualified);
-                      const isResumedByTeacher = !isFinished && !isDisqualified && Boolean(inProgressAttempt);
-                      const canResume = !isFinished && (isResumedByTeacher || (hasLocalProgress && !isDisqualified));
+                      const isResumedByTeacher = !isFinished && Boolean(inProgressAttempt);
+                      const isDisqualified = !isFinished && !isResumedByTeacher && (Boolean(latestDisqualified) || hasLocalViolationLock);
+                      const canResume = !isFinished && !isDisqualified && (isResumedByTeacher || hasLocalProgress);
 
                       const displayScore = latestSubmitted?.scorePercentage ?? latestSubmitted?.totalScore ?? 0;
                       const isPassed = displayScore >= exam.kkm;
@@ -1476,6 +1820,93 @@ export default function SiswaPanel({
             </div>
           );
         })()}
+        {/* MODAL VERIFIKASI TOKEN UJIAN */}
+        {pendingTokenExam && (
+          <div className="fixed inset-0 z-50 bg-slate-900/75 backdrop-blur-sm flex items-center justify-center p-4 animate-in fade-in duration-150">
+            <div className="bg-white rounded-3xl max-w-md w-full p-6 sm:p-7 shadow-2xl border border-slate-200 animate-in zoom-in-95 duration-150">
+              <div className="flex items-center justify-between mb-4">
+                <div className="flex items-center gap-3">
+                  <div className="w-11 h-11 rounded-2xl bg-amber-100 text-amber-700 flex items-center justify-center shrink-0">
+                    <Key className="w-5 h-5" />
+                  </div>
+                  <div>
+                    <h3 className="text-base font-black text-slate-900">
+                      Masukkan Token Ujian
+                    </h3>
+                    <p className="text-xs text-slate-500 font-medium">
+                      {pendingTokenExam.subjectName}
+                    </p>
+                  </div>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setPendingTokenExam(null);
+                    setTokenInput('');
+                    setTokenError('');
+                  }}
+                  className="p-1.5 text-slate-400 hover:text-slate-600 rounded-xl hover:bg-slate-100 cursor-pointer"
+                >
+                  <X className="w-5 h-5" />
+                </button>
+              </div>
+
+              <div className="p-3.5 bg-slate-50 rounded-2xl border border-slate-200 text-xs text-slate-600 mb-4 space-y-1">
+                <p className="font-bold text-slate-900">{pendingTokenExam.title}</p>
+                <p>
+                  {Number(pendingTokenExam.tokenRotationMinutes || 0) > 0
+                    ? `Token ujian ini berubah otomatis setiap ${pendingTokenExam.tokenRotationMinutes} menit. Minta token aktif dari Pengawas di ruangan.`
+                    : 'Masukkan kode token ujian yang diberikan oleh Pengawas/Guru.'}
+                </p>
+              </div>
+
+              <form onSubmit={handleVerifyTokenAndEnter} className="space-y-4">
+                <div>
+                  <label className="block text-xs font-bold text-slate-700 mb-1.5">
+                    Kode Token Aktif
+                  </label>
+                  <input
+                    type="text"
+                    autoFocus
+                    value={tokenInput}
+                    onChange={(e) => {
+                      setTokenInput(e.target.value.toUpperCase());
+                      if (tokenError) setTokenError('');
+                    }}
+                    placeholder="CONTOH: K7M9P2"
+                    className="w-full px-4 py-3 bg-white border-2 border-slate-300 focus:border-indigo-600 rounded-2xl font-mono text-center text-lg font-black tracking-widest uppercase text-slate-900 focus:outline-none"
+                  />
+                  {tokenError && (
+                    <p className="text-xs font-semibold text-rose-600 mt-2 bg-rose-50 p-2.5 rounded-xl border border-rose-200">
+                      {tokenError}
+                    </p>
+                  )}
+                </div>
+
+                <div className="flex gap-2.5 pt-1">
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setPendingTokenExam(null);
+                      setTokenInput('');
+                      setTokenError('');
+                    }}
+                    className="flex-1 py-2.5 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-xl font-bold text-xs cursor-pointer"
+                  >
+                    Batal
+                  </button>
+                  <button
+                    type="submit"
+                    className="flex-1 py-2.5 bg-indigo-600 hover:bg-indigo-700 text-white rounded-xl font-extrabold text-xs shadow-md cursor-pointer flex items-center justify-center gap-1.5"
+                  >
+                    <Play className="w-3.5 h-3.5" />
+                    <span>Verifikasi & Mulai</span>
+                  </button>
+                </div>
+              </form>
+            </div>
+          </div>
+        )}
       </div>
     );
   }
@@ -1491,8 +1922,42 @@ export default function SiswaPanel({
   return (
     <div
       id="cbt-exam-room"
-      className="fixed inset-0 z-50 bg-slate-100 flex flex-col justify-between overflow-hidden select-none"
+      onCopy={(e) => {
+        const t = e.target as HTMLElement | null;
+        if (!t || (t.tagName !== 'INPUT' && t.tagName !== 'TEXTAREA')) e.preventDefault();
+      }}
+      onCut={(e) => {
+        const t = e.target as HTMLElement | null;
+        if (!t || (t.tagName !== 'INPUT' && t.tagName !== 'TEXTAREA')) e.preventDefault();
+      }}
+      onContextMenu={(e) => e.preventDefault()}
+      onDragStart={(e) => e.preventDefault()}
+      className="fixed inset-0 z-50 bg-slate-100 flex flex-col justify-between overflow-hidden select-none cbt-lockdown"
     >
+      {/* Dynamic Anti-Screenshot / Anti-Foto Student Watermark Overlay */}
+      <div
+        aria-hidden="true"
+        className="pointer-events-none fixed inset-0 z-[55] overflow-hidden select-none opacity-[0.045]"
+      >
+        <div className="grid grid-cols-2 sm:grid-cols-3 gap-12 -rotate-12 scale-125 py-12">
+          {Array.from({ length: 12 }).map((_, idx) => (
+            <div key={idx} className="text-center font-black text-slate-900 text-xs sm:text-sm tracking-wider whitespace-nowrap">
+              {currentUser.name} • {currentUser.nip_nisn || currentUser.username} ({studentClass})
+            </div>
+          ))}
+        </div>
+      </div>
+
+      {/* Tirai Privasi Anti-Screenshot saat tombol screenshot/blur terdeteksi */}
+      {isPrivacyBlackout && submitPhase === 'idle' && (
+        <div className="fixed inset-0 z-[130] bg-slate-950 flex flex-col items-center justify-center p-6 text-center text-white select-none">
+          <ShieldAlert className="w-12 h-12 text-rose-500 mb-3" />
+          <h3 className="text-lg font-black">Layar Soal Disembunyikan</h3>
+          <p className="text-xs text-slate-300 mt-1 max-w-xs">
+            Sistem keamanan CBT mendeteksi percobaan tangkapan layar atau perpindahan fokus.
+          </p>
+        </div>
+      )}
       {/* Top Header Bar */}
       <header className="bg-white border-b border-slate-200 px-4 sm:px-6 py-3 flex items-center justify-between shadow-2xs">
         <div className="flex items-center gap-3">
@@ -2215,7 +2680,7 @@ export default function SiswaPanel({
                 </div>
               ) : (
                 <div className="p-2.5 bg-amber-50 border border-amber-200 rounded-xl text-amber-800 text-[11px]">
-                  Ujian hanya dapat dikumpulkan setelah menit ke-{activeExam.minSubmitMinutes}.
+                  Ujian dapat dikumpulkan setelah {activeExam.minSubmitMinutes} menit pengerjaan (sisa waktu ≤ {formatTimer(Math.max(0, totalExamDurationSeconds - minSubmitSeconds))}).
                   <br />
                   Sisa waktu tunggu:{' '}
                   <strong>{formatTimer(remainingSecondsUntilSubmitAllowed)}</strong>

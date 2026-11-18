@@ -19,6 +19,7 @@ interface LoginViewProps {
   onSyncDatabase?: () => Promise<boolean | void>;
   isSyncing?: boolean;
   lastSyncedTime?: string;
+  logoutNotice?: string;
 }
 
 export default function LoginView({
@@ -29,6 +30,7 @@ export default function LoginView({
   onSyncDatabase,
   isSyncing,
   lastSyncedTime,
+  logoutNotice,
 }: LoginViewProps) {
   const [username, setUsername] = useState('');
   const [password, setPassword] = useState('');
@@ -163,6 +165,11 @@ export default function LoginView({
 
           {/* Form Login */}
           <form onSubmit={handleSubmit} className="space-y-4">
+            {logoutNotice && !errorMessage && (
+              <div className="p-3 bg-amber-50 border border-amber-200 rounded-xl text-amber-800 text-xs font-semibold">
+                {logoutNotice}
+              </div>
+            )}
             {errorMessage && (
               <div className="p-3 bg-rose-50 border border-rose-200 rounded-xl text-rose-700 text-xs font-medium animate-fadeIn">
                 {errorMessage}
