@@ -204,8 +204,10 @@ export default function GuruPanel({
   const [successMessage, setSuccessMessage] = useState('');
   const isTursoActive = isCloudDbConfigured();
   const teacherSubjects = subjects.filter(s => s.teacherName === currentUser.name);
+  const selectableSubjects = teacherSubjects.length > 0 ? teacherSubjects : subjects;
   const availableClasses = Array.from(new Set(students.filter(u => u.classGrade).map(u => u.classGrade as string))).sort();
   if (availableClasses.length === 0) availableClasses.push('7A', '7B', '7C', '8A', '8B', '8C', '9A', '9B', '9C');
+  const [customClassInput, setCustomClassInput] = useState<string>('');
 
   // AI Question Generator Modal
   const [isAiModalOpen, setIsAiModalOpen] = useState(false);
@@ -307,6 +309,23 @@ export default function GuruPanel({
     status: 'active',
     isActive: true,
   });
+
+  // Pastikan setiap kali modal Buat Ujian Baru dibuka, mata pelajaran default terisi valid
+  useEffect(() => {
+    if (!isCreateExamModalOpen) return;
+    setCustomClassInput('');
+    setNewExamForm((prev) => {
+      const defaultSub = selectableSubjects[0] || subjects[0];
+      const hasValidSubject = selectableSubjects.some((s) => s.id === prev.subjectId);
+      return {
+        ...prev,
+        subjectId: hasValidSubject ? prev.subjectId : (defaultSub?.id || ''),
+        subjectName: hasValidSubject ? prev.subjectName : (defaultSub?.name || ''),
+        targetClasses: Array.isArray(prev.targetClasses) ? prev.targetClasses : [],
+      };
+    });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [isCreateExamModalOpen]);
 
   // Print Rekap Nilai Modal (Lembar Rekap Kelas)
   const [isPrintRekapModalOpen, setIsPrintRekapModalOpen] = useState(false);
@@ -935,15 +954,19 @@ export default function GuruPanel({
   // Open Edit Exam Modal
   const handleOpenEditExam = (exam: Exam) => {
     setEditingExam(exam);
+    setCustomClassInput('');
+    const currentClasses = Array.isArray(exam.targetClasses)
+      ? exam.targetClasses.map((c) => String(c).trim()).filter(Boolean)
+      : [];
     setEditExamForm({
       title: exam.title,
-      subjectId: exam.subjectId,
-      targetClasses: exam.targetClasses || ['8A', '8B'],
-      durationMinutes: exam.durationMinutes,
-      startTime: exam.startTime ? exam.startTime.slice(0, 16) : '',
-      endTime: exam.endTime ? exam.endTime.slice(0, 16) : '',
-      kkm: exam.kkm,
-      minSubmitMinutes: exam.minSubmitMinutes,
+      subjectId: exam.subjectId || selectableSubjects[0]?.id || '',
+      targetClasses: currentClasses,
+      durationMinutes: Number(exam.durationMinutes) || 60,
+      startTime: exam.startTime ? exam.startTime.slice(0, 16) : new Date().toISOString().slice(0, 16),
+      endTime: exam.endTime ? exam.endTime.slice(0, 16) : new Date(Date.now() + 3600 * 1000 * 48).toISOString().slice(0, 16),
+      kkm: Number(exam.kkm) || 75,
+      minSubmitMinutes: Number(exam.minSubmitMinutes ?? 10),
       randomizeQuestions: exam.randomizeQuestions,
       randomizeOptions: exam.randomizeOptions,
       lockdownBrowser: exam.lockdownBrowser,
@@ -961,10 +984,18 @@ export default function GuruPanel({
   const handleSaveEditExam = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!editingExam) return;
+
+    const normalizedClasses: string[] = Array.from(
+      new Set<string>((editExamForm.targetClasses || []).map((c) => String(c).trim()).filter(Boolean))
+    );
+    if (normalizedClasses.length === 0) {
+      showToast('Kelas Belum Dipilih', 'Silakan pilih minimal 1 kelas sasaran atau klik "Semua Kelas".', 'error');
+      return;
+    }
+
     const sub = subjects.find((s) => s.id === editExamForm.subjectId);
 
     setIsSavingEditExam(true);
-    await new Promise((r) => setTimeout(r, 350));
 
     const rotationMinutes = Number(editExamForm.tokenRotationMinutes || 0);
     const cleanedToken = (editExamForm.token || '').trim().toUpperCase();
@@ -974,15 +1005,15 @@ export default function GuruPanel({
       if (ex.id === editingExam.id) {
         return {
           ...ex,
-          title: editExamForm.title,
-          subjectId: editExamForm.subjectId,
+          title: editExamForm.title.trim() || ex.title,
+          subjectId: editExamForm.subjectId || ex.subjectId,
           subjectName: sub ? sub.name : ex.subjectName,
-          targetClasses: editExamForm.targetClasses,
-          durationMinutes: Number(editExamForm.durationMinutes),
+          targetClasses: normalizedClasses,
+          durationMinutes: Number(editExamForm.durationMinutes) || 60,
           startTime: editExamForm.startTime,
           endTime: editExamForm.endTime,
-          kkm: Number(editExamForm.kkm),
-          minSubmitMinutes: Number(editExamForm.minSubmitMinutes),
+          kkm: Number(editExamForm.kkm) || 75,
+          minSubmitMinutes: Number(editExamForm.minSubmitMinutes ?? 10),
           randomizeQuestions: editExamForm.randomizeQuestions,
           randomizeOptions: editExamForm.randomizeOptions,
           lockdownBrowser: editExamForm.lockdownBrowser,
@@ -997,11 +1028,22 @@ export default function GuruPanel({
       return ex;
     });
 
-    onUpdateExams(updated);
-    setIsSavingEditExam(false);
-    setIsEditExamModalOpen(false);
-    setEditingExam(null);
-    showToast('Ujian Diperbarui', `Pengaturan ujian "${editExamForm.title}" berhasil diperbarui!`, 'success');
+    try {
+      const savedOk = await onUpdateExams(updated);
+      if (savedOk === false) {
+        showToast(
+          'Gagal Menyimpan ke Server',
+          'Perubahan jadwal belum tersimpan ke database Turso. Periksa koneksi internet lalu coba simpan ulang.',
+          'error'
+        );
+        return;
+      }
+      setIsEditExamModalOpen(false);
+      setEditingExam(null);
+      showToast('Ujian Diperbarui', `Pengaturan & kelas ujian "${editExamForm.title}" berhasil disimpan!`, 'success');
+    } finally {
+      setIsSavingEditExam(false);
+    }
   };
 
   // Delete Exam Handler
@@ -1166,24 +1208,40 @@ export default function GuruPanel({
   // Create New Exam Handler
   const handleSaveNewExam = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!newExamForm.title || !newExamForm.subjectId) return;
+    if (!newExamForm.title?.trim()) {
+      showToast('Judul Kosong', 'Silakan isi Judul Ujian terlebih dahulu.', 'error');
+      return;
+    }
+
+    const effectiveSubjectId = newExamForm.subjectId || selectableSubjects[0]?.id || subjects[0]?.id || '';
+    const sub = subjects.find((s) => s.id === effectiveSubjectId);
+    if (!effectiveSubjectId || !sub) {
+      showToast('Mapel Belum Dipilih', 'Silakan pilih Mata Pelajaran terlebih dahulu.', 'error');
+      return;
+    }
+
+    const normalizedClasses: string[] = Array.from(
+      new Set<string>((newExamForm.targetClasses || []).map((c) => String(c).trim()).filter(Boolean))
+    );
+    if (normalizedClasses.length === 0) {
+      showToast('Kelas Belum Dipilih', 'Silakan pilih minimal 1 kelas sasaran atau klik "Semua Kelas".', 'error');
+      return;
+    }
 
     setIsSavingNewExam(true);
-    await new Promise((r) => setTimeout(r, 350));
 
-    const sub = subjects.find((s) => s.id === newExamForm.subjectId);
     const createdExam: Exam = {
       id: 'exam_' + Date.now(),
-      title: newExamForm.title || 'Ujian Baru',
-      subjectId: newExamForm.subjectId,
-      subjectName: sub ? sub.name : 'Mata Pelajaran',
+      title: newExamForm.title.trim(),
+      subjectId: effectiveSubjectId,
+      subjectName: sub.name,
       teacherId: currentUser.id,
       teacherName: currentUser.name,
-      targetClasses: newExamForm.targetClasses || ['8A', '8B'],
-      startTime: newExamForm.startTime || new Date().toISOString(),
-      endTime: newExamForm.endTime || new Date(Date.now() + 3600 * 1000 * 24).toISOString(),
+      targetClasses: normalizedClasses,
+      startTime: newExamForm.startTime || new Date().toISOString().slice(0, 16),
+      endTime: newExamForm.endTime || new Date(Date.now() + 3600 * 1000 * 48).toISOString().slice(0, 16),
       durationMinutes: Number(newExamForm.durationMinutes) || 60,
-      minSubmitMinutes: Number(newExamForm.minSubmitMinutes) || 10,
+      minSubmitMinutes: Number(newExamForm.minSubmitMinutes ?? 10),
       kkm: Number(newExamForm.kkm) || 75,
       allowRetake: Boolean(newExamForm.allowRetake),
       maxRetakes: Number(newExamForm.maxRetakes) || 1,
@@ -1197,16 +1255,33 @@ export default function GuruPanel({
         (Number(newExamForm.tokenRotationMinutes || 0) > 0 ? generateRandomTokenCode(6) : 'DIRECT'),
       tokenRotationMinutes: Number(newExamForm.tokenRotationMinutes || 0),
       status: 'active',
-      isActive: true, // Exams are active by default
+      isActive: newExamForm.isActive !== false,
       createdAt: new Date().toISOString(),
       questions: [],
     };
 
-    onUpdateExams([createdExam, ...allExams]);
-    setSelectedExamId(createdExam.id);
-    setIsSavingNewExam(false);
-    showToast('Ujian Dibuat', `Paket ujian "${createdExam.title}" berhasil dibuat! Silakan tambahkan butir soal.`, 'success');
-    setIsCreateExamModalOpen(false);
+    try {
+      const savedOk = await onUpdateExams([createdExam, ...allExams]);
+      if (savedOk === false) {
+        showToast(
+          'Gagal Menyimpan ke Server',
+          'Jadwal ujian gagal disimpan ke database Turso. Periksa koneksi internet lalu coba lagi.',
+          'error'
+        );
+        return;
+      }
+      setSelectedExamId(createdExam.id);
+      setNewExamForm((prev) => ({
+        ...prev,
+        title: '',
+        targetClasses: [],
+        token: generateRandomTokenCode(6),
+      }));
+      showToast('Ujian Dibuat', `Paket ujian "${createdExam.title}" berhasil dibuat untuk kelas ${normalizedClasses.includes('all') ? 'Semua Kelas' : normalizedClasses.join(', ')}!`, 'success');
+      setIsCreateExamModalOpen(false);
+    } finally {
+      setIsSavingNewExam(false);
+    }
   };
 
   // Toggle Release Score
@@ -2092,7 +2167,15 @@ export default function GuruPanel({
                           <span>Selesai: {new Date(exam.endTime).toLocaleString('id-ID')}</span>
                         </div>
                         <div className="text-[11px] text-slate-600 pt-1">
-                          Kelas Sasaran: <strong>{exam.targetClasses.join(', ')}</strong> • Total Soal: <strong>{count} butir</strong>
+                          Kelas Sasaran:{' '}
+                          <strong>
+                            {exam.targetClasses?.includes('all')
+                              ? 'Semua Kelas'
+                              : exam.targetClasses?.length
+                                ? exam.targetClasses.join(', ')
+                                : 'Belum dipilih'}
+                          </strong>{' '}
+                          • Total Soal: <strong>{count} butir</strong>
                         </div>
                       </div>
 
@@ -4116,12 +4199,127 @@ export default function GuruPanel({
                   onChange={(e) => setNewExamForm({ ...newExamForm, subjectId: e.target.value })}
                   className="w-full p-2.5 bg-slate-50 border border-slate-300 rounded-xl"
                 >
-                  {teacherSubjects.map((s) => (
+                  {selectableSubjects.map((s) => (
                     <option key={s.id} value={s.id}>
                       {s.name} ({s.code})
                     </option>
                   ))}
                 </select>
+              </div>
+
+              <div>
+                <div className="flex flex-wrap items-center justify-between gap-2 mb-1.5">
+                  <label className="block font-bold text-slate-700">
+                    Kelas Sasaran (Pilih satu atau lebih)
+                  </label>
+                  <div className="flex items-center gap-1.5">
+                    <button
+                      type="button"
+                      onClick={() => setNewExamForm({ ...newExamForm, targetClasses: ['all'] })}
+                      className={`px-2 py-0.5 rounded-md text-[10px] font-bold border transition cursor-pointer ${
+                        newExamForm.targetClasses?.includes('all')
+                          ? 'bg-indigo-600 text-white border-indigo-600'
+                          : 'bg-slate-50 text-slate-600 border-slate-200 hover:bg-slate-100'
+                      }`}
+                    >
+                      Semua Kelas
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setNewExamForm({ ...newExamForm, targetClasses: [...availableClasses] })}
+                      className="px-2 py-0.5 rounded-md text-[10px] font-bold bg-indigo-50 text-indigo-700 border border-indigo-200 hover:bg-indigo-100 transition cursor-pointer"
+                    >
+                      Pilih Semua
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setNewExamForm({ ...newExamForm, targetClasses: [] })}
+                      className="px-2 py-0.5 rounded-md text-[10px] font-bold bg-slate-50 text-slate-600 border border-slate-200 hover:bg-slate-100 transition cursor-pointer"
+                    >
+                      Bersihkan
+                    </button>
+                  </div>
+                </div>
+
+                {(() => {
+                  const currentList = newExamForm.targetClasses || [];
+                  const isAllSelected = currentList.includes('all');
+                  const extraClasses = currentList.filter((c) => c !== 'all' && !availableClasses.includes(c));
+                  const classOptions = [...availableClasses, ...extraClasses];
+
+                  return (
+                    <div className="p-3 bg-slate-50 border border-slate-200 rounded-xl space-y-2.5">
+                      <div className="flex flex-wrap gap-2">
+                        {classOptions.map((cls) => {
+                          const isChecked = isAllSelected || currentList.includes(cls);
+                          return (
+                            <label
+                              key={cls}
+                              className={`flex items-center gap-1.5 cursor-pointer border px-3 py-1.5 rounded-lg transition ${
+                                isChecked
+                                  ? 'bg-indigo-50 border-indigo-300 text-indigo-900'
+                                  : 'bg-white border-slate-200 hover:bg-slate-100 text-slate-700'
+                              }`}
+                            >
+                              <input
+                                type="checkbox"
+                                className="rounded text-indigo-600 focus:ring-indigo-500"
+                                checked={Boolean(isChecked)}
+                                onChange={(e) => {
+                                  const base = isAllSelected ? [...availableClasses] : currentList.filter((c) => c !== 'all');
+                                  const updated = e.target.checked
+                                    ? Array.from(new Set([...base, cls]))
+                                    : base.filter((c) => c !== cls);
+                                  setNewExamForm({ ...newExamForm, targetClasses: updated });
+                                }}
+                              />
+                              <span className="text-xs font-semibold">{cls}</span>
+                            </label>
+                          );
+                        })}
+                      </div>
+
+                      <div className="flex items-center gap-2 pt-1 border-t border-slate-200/80">
+                        <input
+                          type="text"
+                          value={customClassInput}
+                          onChange={(e) => setCustomClassInput(e.target.value.toUpperCase())}
+                          onKeyDown={(e) => {
+                            if (e.key === 'Enter') {
+                              e.preventDefault();
+                              const cls = customClassInput.trim().toUpperCase();
+                              if (!cls) return;
+                              const base = (newExamForm.targetClasses || []).filter((c) => c !== 'all');
+                              setNewExamForm({
+                                ...newExamForm,
+                                targetClasses: Array.from(new Set([...base, cls])),
+                              });
+                              setCustomClassInput('');
+                            }
+                          }}
+                          placeholder="Tambah kelas manual (misal: 8E / XI-A)"
+                          className="flex-1 px-2.5 py-1.5 bg-white border border-slate-200 rounded-lg text-[11px]"
+                        />
+                        <button
+                          type="button"
+                          onClick={() => {
+                            const cls = customClassInput.trim().toUpperCase();
+                            if (!cls) return;
+                            const base = (newExamForm.targetClasses || []).filter((c) => c !== 'all');
+                            setNewExamForm({
+                              ...newExamForm,
+                              targetClasses: Array.from(new Set([...base, cls])),
+                            });
+                            setCustomClassInput('');
+                          }}
+                          className="px-2.5 py-1.5 bg-slate-800 hover:bg-slate-900 text-white rounded-lg text-[11px] font-bold cursor-pointer shrink-0"
+                        >
+                          + Kelas
+                        </button>
+                      </div>
+                    </div>
+                  );
+                })()}
               </div>
 
               <div className="grid grid-cols-2 gap-3">
@@ -4176,8 +4374,8 @@ export default function GuruPanel({
                   <label className="block font-bold text-slate-700 mb-1">Durasi (Menit)</label>
                   <input
                     type="number"
-                    min={10}
-                    max={180}
+                    min={1}
+                    max={300}
                     value={newExamForm.durationMinutes}
                     onChange={(e) => setNewExamForm({ ...newExamForm, durationMinutes: Number(e.target.value) })}
                     className="w-full p-2.5 bg-slate-50 border border-slate-300 rounded-xl font-mono"
@@ -4188,8 +4386,8 @@ export default function GuruPanel({
                   <label className="block font-bold text-slate-700 mb-1">Min. Submit (Menit)</label>
                   <input
                     type="number"
-                    min={1}
-                    max={60}
+                    min={0}
+                    max={180}
                     value={newExamForm.minSubmitMinutes}
                     onChange={(e) => setNewExamForm({ ...newExamForm, minSubmitMinutes: Number(e.target.value) })}
                     className="w-full p-2.5 bg-slate-50 border border-slate-300 rounded-xl font-mono"
@@ -4200,7 +4398,7 @@ export default function GuruPanel({
                   <label className="block font-bold text-slate-700 mb-1">Nilai KKM</label>
                   <input
                     type="number"
-                    min={50}
+                    min={0}
                     max={100}
                     value={newExamForm.kkm}
                     onChange={(e) => setNewExamForm({ ...newExamForm, kkm: Number(e.target.value) })}
@@ -4836,7 +5034,14 @@ export default function GuruPanel({
                   onChange={(e) => setEditExamForm({ ...editExamForm, subjectId: e.target.value })}
                   className="w-full p-2.5 bg-slate-50 border border-slate-300 rounded-xl"
                 >
-                  {teacherSubjects.map((s) => (
+                  {editingExam &&
+                    !selectableSubjects.some((s) => s.id === editingExam.subjectId) &&
+                    editingExam.subjectId && (
+                      <option value={editingExam.subjectId}>
+                        {editingExam.subjectName}
+                      </option>
+                    )}
+                  {selectableSubjects.map((s) => (
                     <option key={s.id} value={s.id}>
                       {s.name} ({s.code})
                     </option>
@@ -4845,26 +5050,118 @@ export default function GuruPanel({
               </div>
 
               <div>
-                <label className="block font-bold text-slate-700 mb-1">Kelas Sasaran (Pilih satu atau lebih)</label>
-                <div className="flex flex-wrap gap-2">
-                  {availableClasses.map(cls => (
-                    <label key={cls} className="flex items-center gap-1.5 cursor-pointer bg-slate-50 border border-slate-200 px-3 py-1.5 rounded-lg hover:bg-slate-100">
-                      <input 
-                        type="checkbox" 
-                        className="rounded text-indigo-600 focus:ring-indigo-500"
-                        checked={editExamForm.targetClasses?.includes(cls)}
-                        onChange={(e) => {
-                          const current = editExamForm.targetClasses || [];
-                          const updated = e.target.checked 
-                            ? [...current, cls]
-                            : current.filter(c => c !== cls);
-                          setEditExamForm({ ...editExamForm, targetClasses: updated });
-                        }}
-                      />
-                      <span className="text-xs font-semibold text-slate-700">{cls}</span>
-                    </label>
-                  ))}
+                <div className="flex flex-wrap items-center justify-between gap-2 mb-1.5">
+                  <label className="block font-bold text-slate-700">
+                    Kelas Sasaran (Pilih satu atau lebih)
+                  </label>
+                  <div className="flex items-center gap-1.5">
+                    <button
+                      type="button"
+                      onClick={() => setEditExamForm({ ...editExamForm, targetClasses: ['all'] })}
+                      className={`px-2 py-0.5 rounded-md text-[10px] font-bold border transition cursor-pointer ${
+                        editExamForm.targetClasses?.includes('all')
+                          ? 'bg-indigo-600 text-white border-indigo-600'
+                          : 'bg-slate-50 text-slate-600 border-slate-200 hover:bg-slate-100'
+                      }`}
+                    >
+                      Semua Kelas
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setEditExamForm({ ...editExamForm, targetClasses: [...availableClasses] })}
+                      className="px-2 py-0.5 rounded-md text-[10px] font-bold bg-indigo-50 text-indigo-700 border border-indigo-200 hover:bg-indigo-100 transition cursor-pointer"
+                    >
+                      Pilih Semua
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setEditExamForm({ ...editExamForm, targetClasses: [] })}
+                      className="px-2 py-0.5 rounded-md text-[10px] font-bold bg-slate-50 text-slate-600 border border-slate-200 hover:bg-slate-100 transition cursor-pointer"
+                    >
+                      Bersihkan
+                    </button>
+                  </div>
                 </div>
+
+                {(() => {
+                  const currentList = editExamForm.targetClasses || [];
+                  const isAllSelected = currentList.includes('all');
+                  const extraClasses = currentList.filter((c) => c !== 'all' && !availableClasses.includes(c));
+                  const classOptions = [...availableClasses, ...extraClasses];
+
+                  return (
+                    <div className="p-3 bg-slate-50 border border-slate-200 rounded-xl space-y-2.5">
+                      <div className="flex flex-wrap gap-2">
+                        {classOptions.map((cls) => {
+                          const isChecked = isAllSelected || currentList.includes(cls);
+                          return (
+                            <label
+                              key={cls}
+                              className={`flex items-center gap-1.5 cursor-pointer border px-3 py-1.5 rounded-lg transition ${
+                                isChecked
+                                  ? 'bg-indigo-50 border-indigo-300 text-indigo-900'
+                                  : 'bg-white border-slate-200 hover:bg-slate-100 text-slate-700'
+                              }`}
+                            >
+                              <input
+                                type="checkbox"
+                                className="rounded text-indigo-600 focus:ring-indigo-500"
+                                checked={Boolean(isChecked)}
+                                onChange={(e) => {
+                                  const base = isAllSelected ? [...availableClasses] : currentList.filter((c) => c !== 'all');
+                                  const updated = e.target.checked
+                                    ? Array.from(new Set([...base, cls]))
+                                    : base.filter((c) => c !== cls);
+                                  setEditExamForm({ ...editExamForm, targetClasses: updated });
+                                }}
+                              />
+                              <span className="text-xs font-semibold">{cls}</span>
+                            </label>
+                          );
+                        })}
+                      </div>
+
+                      <div className="flex items-center gap-2 pt-1 border-t border-slate-200/80">
+                        <input
+                          type="text"
+                          value={customClassInput}
+                          onChange={(e) => setCustomClassInput(e.target.value.toUpperCase())}
+                          onKeyDown={(e) => {
+                            if (e.key === 'Enter') {
+                              e.preventDefault();
+                              const cls = customClassInput.trim().toUpperCase();
+                              if (!cls) return;
+                              const base = (editExamForm.targetClasses || []).filter((c) => c !== 'all');
+                              setEditExamForm({
+                                ...editExamForm,
+                                targetClasses: Array.from(new Set([...base, cls])),
+                              });
+                              setCustomClassInput('');
+                            }
+                          }}
+                          placeholder="Tambah kelas manual (misal: 8E / XI-A)"
+                          className="flex-1 px-2.5 py-1.5 bg-white border border-slate-200 rounded-lg text-[11px]"
+                        />
+                        <button
+                          type="button"
+                          onClick={() => {
+                            const cls = customClassInput.trim().toUpperCase();
+                            if (!cls) return;
+                            const base = (editExamForm.targetClasses || []).filter((c) => c !== 'all');
+                            setEditExamForm({
+                              ...editExamForm,
+                              targetClasses: Array.from(new Set([...base, cls])),
+                            });
+                            setCustomClassInput('');
+                          }}
+                          className="px-2.5 py-1.5 bg-slate-800 hover:bg-slate-900 text-white rounded-lg text-[11px] font-bold cursor-pointer shrink-0"
+                        >
+                          + Kelas
+                        </button>
+                      </div>
+                    </div>
+                  );
+                })()}
               </div>
 
 
@@ -4923,8 +5220,8 @@ export default function GuruPanel({
                   <label className="block font-bold text-slate-700 mb-1">Durasi (Menit)</label>
                   <input
                     type="number"
-                    min={10}
-                    max={180}
+                    min={1}
+                    max={300}
                     value={editExamForm.durationMinutes}
                     onChange={(e) =>
                       setEditExamForm({ ...editExamForm, durationMinutes: Number(e.target.value) })
@@ -4937,8 +5234,8 @@ export default function GuruPanel({
                   <label className="block font-bold text-slate-700 mb-1">Min. Submit (Menit)</label>
                   <input
                     type="number"
-                    min={1}
-                    max={60}
+                    min={0}
+                    max={180}
                     value={editExamForm.minSubmitMinutes}
                     onChange={(e) =>
                       setEditExamForm({ ...editExamForm, minSubmitMinutes: Number(e.target.value) })
@@ -4951,7 +5248,7 @@ export default function GuruPanel({
                   <label className="block font-bold text-slate-700 mb-1">Nilai KKM</label>
                   <input
                     type="number"
-                    min={50}
+                    min={0}
                     max={100}
                     value={editExamForm.kkm}
                     onChange={(e) => setEditExamForm({ ...editExamForm, kkm: Number(e.target.value) })}
