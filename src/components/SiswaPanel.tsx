@@ -2874,7 +2874,7 @@ export default function SiswaPanel({
                     onClick={triggerSubmitExam}
                     className="py-2.5 px-4 bg-emerald-600 hover:bg-emerald-700 text-white font-extrabold rounded-xl text-xs shadow-sm cursor-pointer flex items-center justify-center gap-1.5"
                   >
-                    <span>Ya, Kumpulkan Sekarang</span>
+                    <span>Selesai Tes</span>
                   </button>
                 </div>
               </>
