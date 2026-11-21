@@ -238,7 +238,7 @@ export default function LoginView({
               disabled={isLoading}
               className="w-full mt-2 py-3 px-4 bg-indigo-600 hover:bg-indigo-700 active:scale-[0.99] disabled:opacity-70 text-white rounded-xl text-xs sm:text-sm font-bold shadow-lg shadow-indigo-600/30 transition flex items-center justify-center gap-2 cursor-pointer"
             >
-              <span>{isLoading ? 'Memverifikasi...' : 'Masuk Sistem'}</span>
+              <span>{isLoading ? 'Memverifikasi...' : 'Login'}</span>
               {!isLoading && <ArrowRight className="w-4 h-4" />}
             </button>
           </form>

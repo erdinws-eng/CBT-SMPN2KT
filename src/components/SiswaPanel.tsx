@@ -1400,7 +1400,7 @@ export default function SiswaPanel({
                         Daftar Ujian
                       </h2>
                       <p className="text-xs text-slate-500">
-                        Pilih mata pelajaran yang dijadwalkan, lalu klik Mulai Kerjakan Ujian.
+                        Pilih mata pelajaran yang dijadwalkan, lalu klik Kerjakan Ujian.
                       </p>
                     </div>
                   </div>
@@ -1642,7 +1642,7 @@ export default function SiswaPanel({
                                 className={`w-full py-2.5 px-4 text-white font-bold text-xs rounded-xl flex items-center justify-center gap-2 shadow-xs transition cursor-pointer ${theme.btnStart}`}
                               >
                                 <Play className="w-4 h-4 shrink-0" />
-                                <span className="truncate">Mulai Kerjakan Ujian</span>
+                                <span className="truncate">Kerjakan Ujian</span>
                                 <ArrowRight className="w-3.5 h-3.5 shrink-0" />
                               </button>
                             )}
@@ -1820,21 +1820,21 @@ export default function SiswaPanel({
             </div>
           );
         })()}
-        {/* MODAL VERIFIKASI TOKEN UJIAN */}
+        {/* MODAL PAKET UJIAN & VERIFIKASI TOKEN */}
         {pendingTokenExam && (
           <div className="fixed inset-0 z-50 bg-slate-900/75 backdrop-blur-sm flex items-center justify-center p-4 animate-in fade-in duration-150">
-            <div className="bg-white rounded-3xl max-w-md w-full p-6 sm:p-7 shadow-2xl border border-slate-200 animate-in zoom-in-95 duration-150">
-              <div className="flex items-center justify-between mb-4">
+            <div className="bg-white rounded-3xl max-w-lg w-full p-6 sm:p-7 shadow-2xl border border-slate-200 animate-in zoom-in-95 duration-150 max-h-[92vh] overflow-y-auto">
+              <div className="flex items-center justify-between mb-4 pb-3 border-b border-slate-100">
                 <div className="flex items-center gap-3">
-                  <div className="w-11 h-11 rounded-2xl bg-amber-100 text-amber-700 flex items-center justify-center shrink-0">
-                    <Key className="w-5 h-5" />
+                  <div className="w-11 h-11 rounded-2xl bg-indigo-100 text-indigo-700 flex items-center justify-center shrink-0">
+                    <BookOpen className="w-5 h-5" />
                   </div>
                   <div>
                     <h3 className="text-base font-black text-slate-900">
-                      Masukkan Token Ujian
+                      Paket Ujian
                     </h3>
                     <p className="text-xs text-slate-500 font-medium">
-                      {pendingTokenExam.subjectName}
+                      Konfirmasi data peserta, paket ujian, dan token akses
                     </p>
                   </div>
                 </div>
@@ -1851,20 +1851,53 @@ export default function SiswaPanel({
                 </button>
               </div>
 
-              <div className="p-3.5 bg-slate-50 rounded-2xl border border-slate-200 text-xs text-slate-600 mb-4 space-y-1">
-                <p className="font-bold text-slate-900">{pendingTokenExam.title}</p>
-                <p>
-                  {Number(pendingTokenExam.tokenRotationMinutes || 0) > 0
-                    ? `Token ujian ini berubah otomatis setiap ${pendingTokenExam.tokenRotationMinutes} menit. Minta token aktif dari Pengawas di ruangan.`
-                    : 'Masukkan kode token ujian yang diberikan oleh Pengawas/Guru.'}
-                </p>
-              </div>
-
               <form onSubmit={handleVerifyTokenAndEnter} className="space-y-4">
-                <div>
-                  <label className="block text-xs font-bold text-slate-700 mb-1.5">
-                    Kode Token Aktif
-                  </label>
+                <div className="bg-slate-50 rounded-2xl border border-slate-200 divide-y divide-slate-200 text-xs overflow-hidden">
+                  <div className="px-4 py-2.5 flex items-center justify-between gap-3">
+                    <span className="text-slate-500 font-semibold">Nama Siswa</span>
+                    <span className="font-bold text-slate-900 text-right">{currentUser.name}</span>
+                  </div>
+                  <div className="px-4 py-2.5 flex items-center justify-between gap-3">
+                    <span className="text-slate-500 font-semibold">NISN</span>
+                    <span className="font-mono font-bold text-slate-900 text-right">
+                      {currentUser.nip_nisn || currentUser.username || '-'}
+                    </span>
+                  </div>
+                  <div className="px-4 py-2.5 flex items-center justify-between gap-3">
+                    <span className="text-slate-500 font-semibold">Kelas</span>
+                    <span className="font-bold text-slate-900 text-right">
+                      {currentUser.classGrade || '-'}
+                    </span>
+                  </div>
+                  <div className="px-4 py-2.5 flex items-center justify-between gap-3">
+                    <span className="text-slate-500 font-semibold">Mata Pelajaran</span>
+                    <div className="text-right">
+                      <span className="font-bold text-indigo-700 block">
+                        {pendingTokenExam.subjectName}
+                      </span>
+                      <span className="text-[11px] text-slate-500">{pendingTokenExam.title}</span>
+                    </div>
+                  </div>
+                  <div className="px-4 py-2.5 flex items-center justify-between gap-3">
+                    <span className="text-slate-500 font-semibold">Waktu Pengerjaan</span>
+                    <span className="font-bold text-slate-900 text-right">
+                      {pendingTokenExam.durationMinutes} Menit
+                    </span>
+                  </div>
+                </div>
+
+                <div className="p-4 bg-amber-50/70 rounded-2xl border border-amber-200/80 space-y-2">
+                  <div className="flex items-center justify-between gap-2">
+                    <label className="text-xs font-extrabold text-slate-800 flex items-center gap-1.5">
+                      <Key className="w-3.5 h-3.5 text-amber-600" />
+                      <span>Token Paket Ujian</span>
+                    </label>
+                    {Number(pendingTokenExam.tokenRotationMinutes || 0) > 0 && (
+                      <span className="text-[10px] font-bold px-2 py-0.5 rounded-md bg-amber-100 text-amber-800 border border-amber-200">
+                        Update tiap {pendingTokenExam.tokenRotationMinutes} menit
+                      </span>
+                    )}
+                  </div>
                   <input
                     type="text"
                     autoFocus
@@ -1873,11 +1906,16 @@ export default function SiswaPanel({
                       setTokenInput(e.target.value.toUpperCase());
                       if (tokenError) setTokenError('');
                     }}
-                    placeholder="CONTOH: K7M9P2"
-                    className="w-full px-4 py-3 bg-white border-2 border-slate-300 focus:border-indigo-600 rounded-2xl font-mono text-center text-lg font-black tracking-widest uppercase text-slate-900 focus:outline-none"
+                    placeholder="MASUKKAN TOKEN"
+                    className="w-full px-4 py-3 bg-white border-2 border-slate-300 focus:border-indigo-600 rounded-xl font-mono text-center text-lg font-black tracking-widest uppercase text-slate-900 focus:outline-none"
                   />
+                  <p className="text-[11px] text-slate-600">
+                    {Number(pendingTokenExam.tokenRotationMinutes || 0) > 0
+                      ? `Token berubah otomatis setiap ${pendingTokenExam.tokenRotationMinutes} menit. Minta token aktif dari Pengawas di ruangan.`
+                      : 'Masukkan kode token paket ujian yang diberikan oleh Pengawas/Guru.'}
+                  </p>
                   {tokenError && (
-                    <p className="text-xs font-semibold text-rose-600 mt-2 bg-rose-50 p-2.5 rounded-xl border border-rose-200">
+                    <p className="text-xs font-semibold text-rose-600 mt-1 bg-rose-50 p-2.5 rounded-xl border border-rose-200">
                       {tokenError}
                     </p>
                   )}
@@ -1900,7 +1938,7 @@ export default function SiswaPanel({
                     className="flex-1 py-2.5 bg-indigo-600 hover:bg-indigo-700 text-white rounded-xl font-extrabold text-xs shadow-md cursor-pointer flex items-center justify-center gap-1.5"
                   >
                     <Play className="w-3.5 h-3.5" />
-                    <span>Verifikasi & Mulai</span>
+                    <span>Submit</span>
                   </button>
                 </div>
               </form>
@@ -2596,7 +2634,7 @@ export default function SiswaPanel({
                 className="px-5 py-2.5 bg-emerald-600 hover:bg-emerald-700 disabled:opacity-40 disabled:cursor-not-allowed text-white font-bold rounded-xl text-xs flex items-center gap-1.5 transition cursor-pointer shadow-xs"
                 title={canSubmitNow ? 'Kumpulkan Ujian' : `Tunggu menit ke-${activeExam.minSubmitMinutes}`}
               >
-                <span>Selesai & Kumpulkan</span>
+                <span>Selesai</span>
                 <FileCheck className="w-4 h-4" />
               </button>
             ) : (
@@ -2706,7 +2744,7 @@ export default function SiswaPanel({
                 className="w-full py-3 px-4 bg-emerald-600 hover:bg-emerald-700 disabled:opacity-40 disabled:cursor-not-allowed text-white rounded-xl font-bold transition flex items-center justify-center gap-2 cursor-pointer shadow-sm"
               >
                 <FileCheck className="w-4 h-4" />
-                <span>Selesaikan & Kumpulkan</span>
+                <span>Selesai</span>
               </button>
             </div>
           </div>
