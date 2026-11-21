@@ -1854,6 +1854,12 @@ export default function SiswaPanel({
               <form onSubmit={handleVerifyTokenAndEnter} className="space-y-4">
                 <div className="bg-slate-50 rounded-2xl border border-slate-200 divide-y divide-slate-200 text-xs overflow-hidden text-left">
                   <div className="px-4 py-2.5 grid grid-cols-[128px_1fr] items-start gap-2">
+                    <span className="text-slate-500 font-semibold text-left">Nama Ujian</span>
+                    <span className="font-extrabold text-slate-900 text-left">
+                      : {pendingTokenExam.title}
+                    </span>
+                  </div>
+                  <div className="px-4 py-2.5 grid grid-cols-[128px_1fr] items-start gap-2">
                     <span className="text-slate-500 font-semibold text-left">Nama Siswa</span>
                     <span className="font-bold text-slate-900 text-left">: {currentUser.name}</span>
                   </div>
@@ -1871,14 +1877,9 @@ export default function SiswaPanel({
                   </div>
                   <div className="px-4 py-2.5 grid grid-cols-[128px_1fr] items-start gap-2">
                     <span className="text-slate-500 font-semibold text-left">Mata Pelajaran</span>
-                    <div className="text-left">
-                      <span className="font-bold text-indigo-700 block">
-                        : {pendingTokenExam.subjectName}
-                      </span>
-                      <span className="text-[11px] text-slate-500 block pl-2">
-                        {pendingTokenExam.title}
-                      </span>
-                    </div>
+                    <span className="font-bold text-indigo-700 text-left">
+                      : {pendingTokenExam.subjectName}
+                    </span>
                   </div>
                   <div className="px-4 py-2.5 grid grid-cols-[128px_1fr] items-start gap-2">
                     <span className="text-slate-500 font-semibold text-left">Waktu Pengerjaan</span>
