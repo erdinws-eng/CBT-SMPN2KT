@@ -2057,21 +2057,33 @@ export default function SiswaPanel({
               </button>
             </div>
 
-            {/* Stimulus Media (Images or Video) */}
-            {currentQ?.mediaUrl && currentQ.mediaType === 'image' && (
-              <div className="mb-4 max-w-lg rounded-xl overflow-hidden border border-slate-200 bg-slate-50">
+            {/* Stimulus Media (Images or Video) - Posisi Di Atas Soal */}
+            {currentQ?.mediaUrl && (currentQ.mediaType === 'image' || (!currentQ.mediaType && currentQ.mediaUrl.startsWith('data:image/'))) && (
+              <div className="mb-4 max-w-lg rounded-xl overflow-hidden border border-slate-200 bg-slate-50 select-none">
                 <img
                   src={currentQ.mediaUrl}
-                  alt="Stimulus Soal CBT"
-                  className="w-full max-h-72 object-contain mx-auto"
+                  alt={currentQ.mediaCaption || 'Stimulus Soal CBT'}
+                  className="w-full max-h-72 object-contain mx-auto select-none pointer-events-none"
+                  draggable={false}
+                  onContextMenu={(e) => e.preventDefault()}
                   referrerPolicy="no-referrer"
                 />
+                {currentQ.mediaCaption && (
+                  <p className="px-3 py-2 text-xs text-slate-600 italic text-center bg-white border-t border-slate-200">
+                    {currentQ.mediaCaption}
+                  </p>
+                )}
               </div>
             )}
 
             {currentQ?.mediaUrl && currentQ.mediaType === 'video' && (
               <div className="mb-4 max-w-lg rounded-xl overflow-hidden border border-slate-200 bg-black">
                 <video src={currentQ.mediaUrl} controls className="w-full max-h-72" />
+                {currentQ.mediaCaption && (
+                  <p className="px-3 py-2 text-xs text-slate-600 italic text-center bg-white border-t border-slate-200">
+                    {currentQ.mediaCaption}
+                  </p>
+                )}
               </div>
             )}
 

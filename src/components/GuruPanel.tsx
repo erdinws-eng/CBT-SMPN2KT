@@ -73,6 +73,7 @@ import {
 } from '../lib/excelExportImport';
 import { tursoService } from '../services/tursoService';
 import { isCloudDbConfigured, unifiedDbService } from '../services/unifiedDbService';
+import { compressQuestionImageFile, formatImageSizeLabel } from '../lib/imageUtils';
 
 import RekapPrintModal from './RekapPrintModal';
 
@@ -257,6 +258,9 @@ export default function GuruPanel({
   const [newQuestionPoints, setNewQuestionPoints] = useState(15);
   const [newQuestionMediaType, setNewQuestionMediaType] = useState<'image' | 'video' | 'none'>('none');
   const [newQuestionMediaUrl, setNewQuestionMediaUrl] = useState('');
+  const [newQuestionMediaCaption, setNewQuestionMediaCaption] = useState('');
+  const [isProcessingNewImage, setIsProcessingNewImage] = useState(false);
+  const [isProcessingEditImage, setIsProcessingEditImage] = useState(false);
   const [newQuestionOptions, setNewQuestionOptions] = useState<string[]>([
     'A. ',
     'B. ',
@@ -360,6 +364,9 @@ export default function GuruPanel({
     type: 'pilihan_ganda' as QuestionType,
     prompt: '',
     points: 10,
+    mediaType: 'none' as 'image' | 'video' | 'none',
+    mediaUrl: '',
+    mediaCaption: '',
     correctAnswer: '',
     correctAnswers: [] as string[],
     options: ['', '', '', ''],
@@ -867,6 +874,49 @@ export default function GuruPanel({
     setDeleteConfirm({ isOpen: false, id: '', title: '', type: 'exam' });
   };
 
+  const handleOpenManualQuestionModal = () => {
+    setNewQuestionMediaType('none');
+    setNewQuestionMediaUrl('');
+    setNewQuestionMediaCaption('');
+    setIsProcessingNewImage(false);
+    setIsManualQuestionModalOpen(true);
+  };
+
+  const handleUploadQuestionImageFile = async (
+    file: File | undefined | null,
+    target: 'new' | 'edit'
+  ) => {
+    if (!file) return;
+    if (target === 'new') {
+      setIsProcessingNewImage(true);
+    } else {
+      setIsProcessingEditImage(true);
+    }
+    try {
+      const result = await compressQuestionImageFile(file);
+      if (target === 'new') {
+        setNewQuestionMediaType('image');
+        setNewQuestionMediaUrl(result.dataUrl);
+      } else {
+        setEditQuestionForm((prev) => ({
+          ...prev,
+          mediaType: 'image',
+          mediaUrl: result.dataUrl,
+        }));
+      }
+      const kb = Math.max(1, Math.round(result.sizeBytes / 1024));
+      showToast('Gambar Siap', `Foto berhasil dimuat & dioptimalkan (${result.width}x${result.height}px, ~${kb} KB).`, 'success');
+    } catch (err: any) {
+      showToast('Gagal Memuat Gambar', err?.message || 'Pastikan file berupa gambar yang valid.', 'error');
+    } finally {
+      if (target === 'new') {
+        setIsProcessingNewImage(false);
+      } else {
+        setIsProcessingEditImage(false);
+      }
+    }
+  };
+
   // Manual Question Save Handler
   const handleSaveManualQuestion = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -910,15 +960,22 @@ export default function GuruPanel({
     }
 
     setIsSavingNewQuestion(true);
-    await new Promise((r) => setTimeout(r, 350));
+    const trimmedMediaUrl = newQuestionMediaUrl.trim();
+    const resolvedMediaType: 'image' | 'video' | 'none' = trimmedMediaUrl
+      ? newQuestionMediaType === 'none'
+        ? 'image'
+        : newQuestionMediaType
+      : 'none';
 
+    const trimmedMediaCaption = newQuestionMediaCaption.trim();
     const newQ: Question = {
       id: 'q_manual_' + Date.now(),
       type: newQuestionType,
       prompt: newQuestionPrompt,
       points: Number(newQuestionPoints) || 10,
-      mediaType: newQuestionMediaType,
-      mediaUrl: newQuestionMediaUrl.trim() || undefined,
+      mediaType: resolvedMediaType,
+      mediaUrl: trimmedMediaUrl || undefined,
+      mediaCaption: resolvedMediaType !== 'none' && trimmedMediaCaption ? trimmedMediaCaption : undefined,
       options: finalOptions,
       correctAnswer: finalCorrectAnswer,
       correctAnswers: finalCorrectAnswers,
@@ -933,22 +990,36 @@ export default function GuruPanel({
     const updatedExams = allExams.map((ex) =>
       ex.id === selectedExam.id ? { ...ex, questions: [...ex.questions, newQ] } : ex
     );
-    onUpdateExams(updatedExams);
-    setIsSavingNewQuestion(false);
-    showToast('Soal Tersimpan', 'Soal berhasil ditambahkan ke bank soal ujian!', 'success');
-    setIsManualQuestionModalOpen(false);
-    setNewQuestionPrompt('');
-    setNewQuestionMediaUrl('');
-    setNewQuestionMultiCorrect([]);
-    setNewMatchingPairs([
-      { premise: '', match: '' },
-      { premise: '', match: '' },
-      { premise: '', match: '' },
-    ]);
-    setNewTrueFalseStatements([
-      { statement: '', answer: 'Benar' },
-      { statement: '', answer: 'Salah' },
-    ]);
+    try {
+      const savedOk = await onUpdateExams(updatedExams);
+      if (savedOk === false) {
+        showToast(
+          'Gagal Menyimpan ke Server',
+          'Soal dan gambar belum tersimpan ke database Turso. Periksa koneksi internet lalu coba simpan ulang.',
+          'error'
+        );
+        return;
+      }
+      showToast('Soal Tersimpan', 'Butir soal dan lampiran berhasil disimpan ke database!', 'success');
+      setIsManualQuestionModalOpen(false);
+      setNewQuestionPrompt('');
+      setNewQuestionMediaType('none');
+      setNewQuestionMediaUrl('');
+      setNewQuestionMediaCaption('');
+      setNewQuestionExplanation('');
+      setNewQuestionMultiCorrect([]);
+      setNewMatchingPairs([
+        { premise: '', match: '' },
+        { premise: '', match: '' },
+        { premise: '', match: '' },
+      ]);
+      setNewTrueFalseStatements([
+        { statement: '', answer: 'Benar' },
+        { statement: '', answer: 'Salah' },
+      ]);
+    } finally {
+      setIsSavingNewQuestion(false);
+    }
   };
 
   // Open Edit Exam Modal
@@ -1082,10 +1153,14 @@ export default function GuruPanel({
         : ['A. Pilihan A', 'B. Pilihan B', 'C. Pilihan C', 'D. Pilihan D'];
 
     setEditingQuestion({ ...q, type: normalizedType });
+    setIsProcessingEditImage(false);
     setEditQuestionForm({
       type: normalizedType,
       prompt: q.prompt,
       points: q.points || 10,
+      mediaType: q.mediaType || (q.mediaUrl ? 'image' : 'none'),
+      mediaUrl: q.mediaUrl || '',
+      mediaCaption: q.mediaCaption || '',
       correctAnswer: q.correctAnswer || '',
       correctAnswers: q.correctAnswers || (q.correctAnswer ? [q.correctAnswer] : []),
       options: safeOptions,
@@ -1115,9 +1190,14 @@ export default function GuruPanel({
     if (!selectedExam || !editingQuestion) return;
 
     setIsSavingEditQuestion(true);
-    await new Promise((r) => setTimeout(r, 350));
 
     const targetType = editQuestionForm.type || editingQuestion.type;
+    const trimmedMediaUrl = (editQuestionForm.mediaUrl || '').trim();
+    const resolvedMediaType: 'image' | 'video' | 'none' = trimmedMediaUrl
+      ? editQuestionForm.mediaType === 'none'
+        ? 'image'
+        : editQuestionForm.mediaType
+      : 'none';
 
     const updatedQuestions = selectedExam.questions.map((q) => {
       if (q.id === editingQuestion.id) {
@@ -1173,6 +1253,12 @@ export default function GuruPanel({
           type: targetType,
           prompt: editQuestionForm.prompt,
           points: Number(editQuestionForm.points) || 10,
+          mediaType: resolvedMediaType,
+          mediaUrl: trimmedMediaUrl || undefined,
+          mediaCaption:
+            resolvedMediaType !== 'none' && (editQuestionForm.mediaCaption || '').trim()
+              ? editQuestionForm.mediaCaption.trim()
+              : undefined,
           correctAnswer: finalCorrectAnswer,
           correctAnswers: finalCorrectAnswers,
           options: finalOptions,
@@ -1186,11 +1272,24 @@ export default function GuruPanel({
     });
 
     const updatedExam = { ...selectedExam, questions: updatedQuestions };
-    onUpdateExams(allExams.map((ex) => (ex.id === selectedExam.id ? updatedExam : ex)));
-    setIsSavingEditQuestion(false);
-    setIsEditQuestionModalOpen(false);
-    setEditingQuestion(null);
-    showToast('Soal Diperbarui', 'Butir soal berhasil diperbarui!', 'success');
+    try {
+      const savedOk = await onUpdateExams(
+        allExams.map((ex) => (ex.id === selectedExam.id ? updatedExam : ex))
+      );
+      if (savedOk === false) {
+        showToast(
+          'Gagal Menyimpan ke Server',
+          'Perubahan soal belum tersimpan ke database Turso. Periksa koneksi internet lalu coba simpan ulang.',
+          'error'
+        );
+        return;
+      }
+      setIsEditQuestionModalOpen(false);
+      setEditingQuestion(null);
+      showToast('Soal Diperbarui', 'Perubahan soal & lampiran berhasil disimpan ke database!', 'success');
+    } finally {
+      setIsSavingEditQuestion(false);
+    }
   };
 
   // Delete Question Handler
@@ -2513,7 +2612,7 @@ export default function GuruPanel({
                       {/* Tambah Manual Button */}
                       <button
                         id="btn-open-manual-question-modal"
-                        onClick={() => setIsManualQuestionModalOpen(true)}
+                        onClick={handleOpenManualQuestionModal}
                         className="px-3 py-2.5 bg-slate-900 hover:bg-slate-800 text-white rounded-xl text-xs font-bold flex items-center justify-center gap-2 transition cursor-pointer"
                       >
                         <Plus className="w-4 h-4" />
@@ -2667,7 +2766,7 @@ export default function GuruPanel({
                         <span>Buat dengan AI Sekarang</span>
                       </button>
                       <button
-                        onClick={() => setIsManualQuestionModalOpen(true)}
+                        onClick={handleOpenManualQuestionModal}
                         className="px-4 py-2 bg-slate-100 hover:bg-slate-200 text-slate-700 font-bold text-xs rounded-xl inline-flex items-center gap-1.5 cursor-pointer"
                       >
                         <Plus className="w-4 h-4" />
@@ -2756,28 +2855,38 @@ export default function GuruPanel({
                           </div>
                         </div>
 
-                        {/* Prompt Teks Soal */}
-                        <p className="text-sm font-semibold text-slate-900 mb-3 whitespace-pre-line leading-relaxed">
-                          {q.prompt}
-                        </p>
-
-                        {/* Multimedia Preview if exists */}
-                        {q.mediaUrl && q.mediaType === 'image' && (
-                          <div className="mb-3 max-w-sm rounded-xl overflow-hidden border border-slate-200">
+                        {/* Multimedia Preview - Posisi Di Atas Soal */}
+                        {q.mediaUrl && (q.mediaType === 'image' || (!q.mediaType && q.mediaUrl.startsWith('data:image/'))) && (
+                          <div className="mb-3 max-w-sm rounded-xl overflow-hidden border border-slate-200 bg-slate-50">
                             <img
                               src={q.mediaUrl}
-                              alt="Stimulus Soal"
-                              className="w-full max-h-56 object-cover"
+                              alt={q.mediaCaption || 'Stimulus Soal'}
+                              className="w-full max-h-56 object-contain mx-auto"
                               referrerPolicy="no-referrer"
                             />
+                            {q.mediaCaption && (
+                              <p className="px-3 py-1.5 text-[11px] text-slate-600 italic text-center bg-white border-t border-slate-200">
+                                {q.mediaCaption}
+                              </p>
+                            )}
                           </div>
                         )}
 
                         {q.mediaUrl && q.mediaType === 'video' && (
                           <div className="mb-3 max-w-md rounded-xl overflow-hidden border border-slate-200 bg-black">
                             <video src={q.mediaUrl} controls className="w-full max-h-56" />
+                            {q.mediaCaption && (
+                              <p className="px-3 py-1.5 text-[11px] text-slate-600 italic text-center bg-white border-t border-slate-200">
+                                {q.mediaCaption}
+                              </p>
+                            )}
                           </div>
                         )}
+
+                        {/* Prompt Teks Soal */}
+                        <p className="text-sm font-semibold text-slate-900 mb-3 whitespace-pre-line leading-relaxed">
+                          {q.prompt}
+                        </p>
 
                         {/* Question details based on type */}
                         {(q.type === 'pilihan_ganda' || q.type === 'pilihan_ganda_kompleks') && q.options && q.options.length > 0 && (
@@ -4590,6 +4699,180 @@ export default function GuruPanel({
                 </div>
               </div>
 
+              {/* Multimedia Attachment - Di Atas Teks Pertanyaan */}
+              <div className="p-3 bg-slate-50 border border-slate-200 rounded-xl space-y-2.5">
+                <div className="flex flex-wrap items-center justify-between gap-2">
+                  <label className="font-bold text-slate-700 flex items-center gap-1.5">
+                    <ImageIcon className="w-3.5 h-3.5 text-indigo-600" />
+                    <span>Lampiran Foto / Gambar (Tampil di Atas Soal)</span>
+                  </label>
+                  <div className="flex items-center gap-2">
+                    <select
+                      value={newQuestionMediaType}
+                      onChange={(e) => {
+                        const val = e.target.value as 'image' | 'video' | 'none';
+                        setNewQuestionMediaType(val);
+                        if (val === 'none') {
+                          setNewQuestionMediaUrl('');
+                          setNewQuestionMediaCaption('');
+                        }
+                      }}
+                      className="px-2.5 py-1.5 bg-white border border-slate-300 rounded-lg font-semibold text-slate-700 cursor-pointer"
+                    >
+                      <option value="none">Tanpa Media</option>
+                      <option value="image">Foto / Gambar</option>
+                      <option value="video">Video Edukasi (URL)</option>
+                    </select>
+                    <label className="px-2.5 py-1.5 bg-indigo-600 hover:bg-indigo-700 text-white rounded-lg font-bold flex items-center gap-1.5 cursor-pointer transition shadow-xs">
+                      {isProcessingNewImage ? (
+                        <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                      ) : (
+                        <Upload className="w-3.5 h-3.5" />
+                      )}
+                      <span>{isProcessingNewImage ? 'Memproses...' : 'Upload Foto'}</span>
+                      <input
+                        type="file"
+                        accept="image/png,image/jpeg,image/jpg,image/webp,image/gif"
+                        className="hidden"
+                        onChange={(e) => {
+                          const file = e.target.files?.[0];
+                          e.target.value = '';
+                          handleUploadQuestionImageFile(file, 'new');
+                        }}
+                      />
+                    </label>
+                  </div>
+                </div>
+
+                {newQuestionMediaType === 'image' && (
+                  <div className="space-y-2">
+                    {newQuestionMediaUrl ? (
+                      <div className="bg-white border border-slate-200 rounded-xl p-2.5 space-y-2">
+                        <div className="relative rounded-lg overflow-hidden border border-slate-100 bg-slate-50 flex items-center justify-center">
+                          <img
+                            src={newQuestionMediaUrl}
+                            alt={newQuestionMediaCaption || 'Preview Gambar Soal'}
+                            className="max-h-48 w-auto object-contain mx-auto"
+                            referrerPolicy="no-referrer"
+                          />
+                        </div>
+                        {newQuestionMediaCaption.trim() && (
+                          <p className="text-[11px] text-slate-600 italic text-center px-2">
+                            {newQuestionMediaCaption}
+                          </p>
+                        )}
+                        <div className="flex flex-wrap items-center justify-between gap-2 text-[11px]">
+                          <span className="px-2 py-0.5 bg-emerald-50 text-emerald-700 border border-emerald-200 rounded-md font-semibold">
+                            {formatImageSizeLabel(newQuestionMediaUrl)} • Siap disimpan ke DB
+                          </span>
+                          <div className="flex items-center gap-1.5">
+                            <label className="px-2.5 py-1 bg-indigo-50 hover:bg-indigo-100 text-indigo-700 rounded-lg font-bold cursor-pointer">
+                              Ganti Gambar
+                              <input
+                                type="file"
+                                accept="image/png,image/jpeg,image/jpg,image/webp,image/gif"
+                                className="hidden"
+                                onChange={(e) => {
+                                  const file = e.target.files?.[0];
+                                  e.target.value = '';
+                                  handleUploadQuestionImageFile(file, 'new');
+                                }}
+                              />
+                            </label>
+                            <button
+                              type="button"
+                              onClick={() => {
+                                setNewQuestionMediaUrl('');
+                                setNewQuestionMediaCaption('');
+                                setNewQuestionMediaType('none');
+                              }}
+                              className="px-2.5 py-1 bg-rose-50 hover:bg-rose-100 text-rose-700 rounded-lg font-bold cursor-pointer flex items-center gap-1"
+                            >
+                              <Trash2 className="w-3 h-3" />
+                              Hapus
+                            </button>
+                          </div>
+                        </div>
+                      </div>
+                    ) : (
+                      <label className="flex flex-col items-center justify-center p-4 border-2 border-dashed border-indigo-200 hover:border-indigo-400 bg-white rounded-xl cursor-pointer transition text-center">
+                        {isProcessingNewImage ? (
+                          <Loader2 className="w-6 h-6 text-indigo-600 animate-spin mb-1" />
+                        ) : (
+                          <Upload className="w-6 h-6 text-indigo-500 mb-1" />
+                        )}
+                        <span className="font-bold text-slate-700">
+                          Klik untuk pilih foto / gambar dari komputer
+                        </span>
+                        <span className="text-[11px] text-slate-500 mt-0.5">
+                          Format PNG, JPG, JPEG, WEBP, GIF (otomatis dikompres agar ringan di DB)
+                        </span>
+                        <input
+                          type="file"
+                          accept="image/png,image/jpeg,image/jpg,image/webp,image/gif"
+                          className="hidden"
+                          onChange={(e) => {
+                            const file = e.target.files?.[0];
+                            e.target.value = '';
+                            handleUploadQuestionImageFile(file, 'new');
+                          }}
+                        />
+                      </label>
+                    )}
+
+                    <div>
+                      <input
+                        type="text"
+                        placeholder="Atau tempel link URL gambar eksternal (https://...)..."
+                        value={newQuestionMediaUrl.startsWith('data:image/') ? '' : newQuestionMediaUrl}
+                        onChange={(e) => setNewQuestionMediaUrl(e.target.value)}
+                        className="w-full p-2 bg-white border border-slate-300 rounded-lg font-mono text-[11px]"
+                      />
+                    </div>
+
+                    <div>
+                      <label className="block font-semibold text-slate-700 mb-1">
+                        Keterangan Gambar (Opsional)
+                      </label>
+                      <input
+                        type="text"
+                        placeholder="Contoh: Gambar 1.1 Struktur Sel Hewan / Perhatikan diagram di atas..."
+                        value={newQuestionMediaCaption}
+                        onChange={(e) => setNewQuestionMediaCaption(e.target.value)}
+                        className="w-full p-2 bg-white border border-slate-300 rounded-lg text-xs"
+                      />
+                    </div>
+                  </div>
+                )}
+
+                {newQuestionMediaType === 'video' && (
+                  <div className="space-y-2">
+                    <div>
+                      <label className="block font-semibold text-slate-600 mb-1">URL Video (Link MP4 / Embed)</label>
+                      <input
+                        type="text"
+                        placeholder="https://example.com/video.mp4"
+                        value={newQuestionMediaUrl}
+                        onChange={(e) => setNewQuestionMediaUrl(e.target.value)}
+                        className="w-full p-2 bg-white border border-slate-300 rounded-lg font-mono text-[11px]"
+                      />
+                    </div>
+                    <div>
+                      <label className="block font-semibold text-slate-700 mb-1">
+                        Keterangan Media (Opsional)
+                      </label>
+                      <input
+                        type="text"
+                        placeholder="Contoh: Video ilustrasi percobaan..."
+                        value={newQuestionMediaCaption}
+                        onChange={(e) => setNewQuestionMediaCaption(e.target.value)}
+                        className="w-full p-2 bg-white border border-slate-300 rounded-lg text-xs"
+                      />
+                    </div>
+                  </div>
+                )}
+              </div>
+
               <div>
                 <label className="block font-bold text-slate-700 mb-1">Teks Pertanyaan / Soal</label>
                 <textarea
@@ -4600,34 +4883,6 @@ export default function GuruPanel({
                   className="w-full p-2.5 bg-slate-50 border border-slate-300 rounded-xl"
                   required
                 />
-              </div>
-
-              {/* Multimedia Attachment */}
-              <div className="grid grid-cols-2 gap-3">
-                <div>
-                  <label className="block font-bold text-slate-700 mb-1">Lampiran Media</label>
-                  <select
-                    value={newQuestionMediaType}
-                    onChange={(e) => setNewQuestionMediaType(e.target.value as any)}
-                    className="w-full p-2 bg-slate-50 border border-slate-300 rounded-xl"
-                  >
-                    <option value="none">Tanpa Media</option>
-                    <option value="image">Gambar (Image)</option>
-                    <option value="video">Video Edukasi</option>
-                  </select>
-                </div>
-                {newQuestionMediaType !== 'none' && (
-                  <div>
-                    <label className="block font-bold text-slate-700 mb-1">URL Media (Link)</label>
-                    <input
-                      type="url"
-                      placeholder="https://images.unsplash.com/..."
-                      value={newQuestionMediaUrl}
-                      onChange={(e) => setNewQuestionMediaUrl(e.target.value)}
-                      className="w-full p-2 bg-slate-50 border border-slate-300 rounded-xl font-mono text-[11px]"
-                    />
-                  </div>
-                )}
               </div>
 
               {/* Options for PG */}
@@ -4983,7 +5238,7 @@ export default function GuruPanel({
                 </button>
                 <button
                   type="submit"
-                  disabled={isSavingNewQuestion}
+                  disabled={isSavingNewQuestion || isProcessingNewImage}
                   className="px-4 py-2 bg-indigo-600 hover:bg-indigo-700 disabled:opacity-60 text-white rounded-xl font-bold cursor-pointer flex items-center gap-2"
                 >
                   {isSavingNewQuestion && <Loader2 className="w-4 h-4 animate-spin" />}
@@ -5475,19 +5730,6 @@ export default function GuruPanel({
               </div>
 
               <div>
-                <label className="block font-bold text-slate-700 mb-1">
-                  Teks Soal / Pertanyaan / Stimulus
-                </label>
-                <textarea
-                  rows={3}
-                  value={editQuestionForm.prompt}
-                  onChange={(e) => setEditQuestionForm({ ...editQuestionForm, prompt: e.target.value })}
-                  className="w-full p-2.5 bg-slate-50 border border-slate-300 rounded-xl"
-                  required
-                />
-              </div>
-
-              <div>
                 <label className="block font-bold text-slate-700 mb-1">Bobot Poin Soal</label>
                 <input
                   type="number"
@@ -5498,6 +5740,205 @@ export default function GuruPanel({
                     setEditQuestionForm({ ...editQuestionForm, points: Number(e.target.value) })
                   }
                   className="w-full p-2 bg-slate-50 border border-slate-300 rounded-xl font-mono"
+                  required
+                />
+              </div>
+
+              {/* Multimedia Attachment in Edit Modal - Posisi Di Atas Soal */}
+              <div className="p-3 bg-slate-50 border border-slate-200 rounded-xl space-y-2.5">
+                <div className="flex flex-wrap items-center justify-between gap-2">
+                  <label className="font-bold text-slate-700 flex items-center gap-1.5">
+                    <ImageIcon className="w-3.5 h-3.5 text-indigo-600" />
+                    <span>Lampiran Foto / Gambar (Tampil di Atas Soal)</span>
+                  </label>
+                  <div className="flex items-center gap-2">
+                    <select
+                      value={editQuestionForm.mediaType}
+                      onChange={(e) => {
+                        const val = e.target.value as 'image' | 'video' | 'none';
+                        setEditQuestionForm((prev) => ({
+                          ...prev,
+                          mediaType: val,
+                          mediaUrl: val === 'none' ? '' : prev.mediaUrl,
+                          mediaCaption: val === 'none' ? '' : prev.mediaCaption,
+                        }));
+                      }}
+                      className="px-2.5 py-1.5 bg-white border border-slate-300 rounded-lg font-semibold text-slate-700 cursor-pointer"
+                    >
+                      <option value="none">Tanpa Media</option>
+                      <option value="image">Foto / Gambar</option>
+                      <option value="video">Video Edukasi (URL)</option>
+                    </select>
+                    <label className="px-2.5 py-1.5 bg-indigo-600 hover:bg-indigo-700 text-white rounded-lg font-bold flex items-center gap-1.5 cursor-pointer transition shadow-xs">
+                      {isProcessingEditImage ? (
+                        <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                      ) : (
+                        <Upload className="w-3.5 h-3.5" />
+                      )}
+                      <span>{isProcessingEditImage ? 'Memproses...' : 'Upload Foto'}</span>
+                      <input
+                        type="file"
+                        accept="image/png,image/jpeg,image/jpg,image/webp,image/gif"
+                        className="hidden"
+                        onChange={(e) => {
+                          const file = e.target.files?.[0];
+                          e.target.value = '';
+                          handleUploadQuestionImageFile(file, 'edit');
+                        }}
+                      />
+                    </label>
+                  </div>
+                </div>
+
+                {editQuestionForm.mediaType === 'image' && (
+                  <div className="space-y-2">
+                    {editQuestionForm.mediaUrl ? (
+                      <div className="bg-white border border-slate-200 rounded-xl p-2.5 space-y-2">
+                        <div className="relative rounded-lg overflow-hidden border border-slate-100 bg-slate-50 flex items-center justify-center">
+                          <img
+                            src={editQuestionForm.mediaUrl}
+                            alt={editQuestionForm.mediaCaption || 'Preview Gambar Soal'}
+                            className="max-h-48 w-auto object-contain mx-auto"
+                            referrerPolicy="no-referrer"
+                          />
+                        </div>
+                        {editQuestionForm.mediaCaption.trim() && (
+                          <p className="text-[11px] text-slate-600 italic text-center px-2">
+                            {editQuestionForm.mediaCaption}
+                          </p>
+                        )}
+                        <div className="flex flex-wrap items-center justify-between gap-2 text-[11px]">
+                          <span className="px-2 py-0.5 bg-emerald-50 text-emerald-700 border border-emerald-200 rounded-md font-semibold">
+                            {formatImageSizeLabel(editQuestionForm.mediaUrl)} • Siap disimpan ke DB
+                          </span>
+                          <div className="flex items-center gap-1.5">
+                            <label className="px-2.5 py-1 bg-indigo-50 hover:bg-indigo-100 text-indigo-700 rounded-lg font-bold cursor-pointer">
+                              Ganti Gambar
+                              <input
+                                type="file"
+                                accept="image/png,image/jpeg,image/jpg,image/webp,image/gif"
+                                className="hidden"
+                                onChange={(e) => {
+                                  const file = e.target.files?.[0];
+                                  e.target.value = '';
+                                  handleUploadQuestionImageFile(file, 'edit');
+                                }}
+                              />
+                            </label>
+                            <button
+                              type="button"
+                              onClick={() =>
+                                setEditQuestionForm((prev) => ({
+                                  ...prev,
+                                  mediaType: 'none',
+                                  mediaUrl: '',
+                                  mediaCaption: '',
+                                }))
+                              }
+                              className="px-2.5 py-1 bg-rose-50 hover:bg-rose-100 text-rose-700 rounded-lg font-bold cursor-pointer flex items-center gap-1"
+                            >
+                              <Trash2 className="w-3 h-3" />
+                              Hapus
+                            </button>
+                          </div>
+                        </div>
+                      </div>
+                    ) : (
+                      <label className="flex flex-col items-center justify-center p-4 border-2 border-dashed border-indigo-200 hover:border-indigo-400 bg-white rounded-xl cursor-pointer transition text-center">
+                        {isProcessingEditImage ? (
+                          <Loader2 className="w-6 h-6 text-indigo-600 animate-spin mb-1" />
+                        ) : (
+                          <Upload className="w-6 h-6 text-indigo-500 mb-1" />
+                        )}
+                        <span className="font-bold text-slate-700">
+                          Klik untuk pilih foto / gambar dari komputer
+                        </span>
+                        <span className="text-[11px] text-slate-500 mt-0.5">
+                          Format PNG, JPG, JPEG, WEBP, GIF (otomatis dikompres agar ringan di DB)
+                        </span>
+                        <input
+                          type="file"
+                          accept="image/png,image/jpeg,image/jpg,image/webp,image/gif"
+                          className="hidden"
+                          onChange={(e) => {
+                            const file = e.target.files?.[0];
+                            e.target.value = '';
+                            handleUploadQuestionImageFile(file, 'edit');
+                          }}
+                        />
+                      </label>
+                    )}
+
+                    <div>
+                      <input
+                        type="text"
+                        placeholder="Atau tempel link URL gambar eksternal (https://...)..."
+                        value={editQuestionForm.mediaUrl.startsWith('data:image/') ? '' : editQuestionForm.mediaUrl}
+                        onChange={(e) =>
+                          setEditQuestionForm((prev) => ({ ...prev, mediaUrl: e.target.value }))
+                        }
+                        className="w-full p-2 bg-white border border-slate-300 rounded-lg font-mono text-[11px]"
+                      />
+                    </div>
+
+                    <div>
+                      <label className="block font-semibold text-slate-700 mb-1">
+                        Keterangan Gambar (Opsional)
+                      </label>
+                      <input
+                        type="text"
+                        placeholder="Contoh: Gambar 1.1 Struktur Sel Hewan / Perhatikan diagram di atas..."
+                        value={editQuestionForm.mediaCaption}
+                        onChange={(e) =>
+                          setEditQuestionForm((prev) => ({ ...prev, mediaCaption: e.target.value }))
+                        }
+                        className="w-full p-2 bg-white border border-slate-300 rounded-lg text-xs"
+                      />
+                    </div>
+                  </div>
+                )}
+
+                {editQuestionForm.mediaType === 'video' && (
+                  <div className="space-y-2">
+                    <div>
+                      <label className="block font-semibold text-slate-600 mb-1">URL Video (Link MP4 / Embed)</label>
+                      <input
+                        type="text"
+                        placeholder="https://example.com/video.mp4"
+                        value={editQuestionForm.mediaUrl}
+                        onChange={(e) =>
+                          setEditQuestionForm((prev) => ({ ...prev, mediaUrl: e.target.value }))
+                        }
+                        className="w-full p-2 bg-white border border-slate-300 rounded-lg font-mono text-[11px]"
+                      />
+                    </div>
+                    <div>
+                      <label className="block font-semibold text-slate-700 mb-1">
+                        Keterangan Media (Opsional)
+                      </label>
+                      <input
+                        type="text"
+                        placeholder="Contoh: Video ilustrasi percobaan..."
+                        value={editQuestionForm.mediaCaption}
+                        onChange={(e) =>
+                          setEditQuestionForm((prev) => ({ ...prev, mediaCaption: e.target.value }))
+                        }
+                        className="w-full p-2 bg-white border border-slate-300 rounded-lg text-xs"
+                      />
+                    </div>
+                  </div>
+                )}
+              </div>
+
+              <div>
+                <label className="block font-bold text-slate-700 mb-1">
+                  Teks Soal / Pertanyaan / Stimulus
+                </label>
+                <textarea
+                  rows={3}
+                  value={editQuestionForm.prompt}
+                  onChange={(e) => setEditQuestionForm({ ...editQuestionForm, prompt: e.target.value })}
+                  className="w-full p-2.5 bg-slate-50 border border-slate-300 rounded-xl"
                   required
                 />
               </div>
@@ -5831,7 +6272,7 @@ export default function GuruPanel({
                 </button>
                 <button
                   type="submit"
-                  disabled={isSavingEditQuestion}
+                  disabled={isSavingEditQuestion || isProcessingEditImage}
                   className="px-4 py-2 bg-indigo-600 hover:bg-indigo-700 disabled:opacity-60 text-white rounded-xl font-bold cursor-pointer flex items-center gap-2"
                 >
                   {isSavingEditQuestion && <Loader2 className="w-4 h-4 animate-spin" />}

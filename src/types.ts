@@ -48,6 +48,7 @@ export interface Question {
   prompt: string;
   mediaType?: 'image' | 'video' | 'none';
   mediaUrl?: string;
+  mediaCaption?: string;
   points: number; // default 10
   options?: string[]; // for pilihan_ganda & pilihan_ganda_kompleks (e.g. ["A. ...", "B. ..."])
   correctAnswer?: string; // for pilihan_ganda, isian, single benar_salah
