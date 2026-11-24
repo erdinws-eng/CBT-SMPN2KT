@@ -1,10 +1,15 @@
 import express from "express";
 import path from "path";
 import fs from "fs";
+import dns from "node:dns";
+import http from "node:http";
+import https from "node:https";
+import { Readable } from "node:stream";
 import { GoogleGenAI } from "@google/genai";
 import dotenv from "dotenv";
 
 dotenv.config();
+dns.setDefaultResultOrder("ipv4first");
 
 const app = express();
 const PORT = 3000;
@@ -260,6 +265,232 @@ Semua butir soal HARUS berjenis sesuai daftar di atas. Seluruh konten dalam baha
 // ==============================================================================
 import { createClient as createLibsqlClient } from "@libsql/client/web";
 
+// IPv4-first Keep-Alive Agents to prevent Node Undici IPv6/10s ConnectTimeoutError
+const tursoHttpsAgent = new https.Agent({
+  keepAlive: true,
+  keepAliveMsecs: 15000,
+  maxSockets: 10,
+  timeout: 30000,
+  family: 4,
+});
+
+const tursoHttpAgent = new http.Agent({
+  keepAlive: true,
+  keepAliveMsecs: 15000,
+  maxSockets: 10,
+  timeout: 30000,
+  family: 4,
+});
+
+async function tursoFetch(input: RequestInfo | URL, init?: RequestInit): Promise<Response> {
+  let urlStr: string;
+  let method = "GET";
+  const headersObj: Record<string, string> = {};
+  let signal: AbortSignal | undefined;
+  let bodyBuf: Buffer | undefined;
+
+  if (typeof Request !== "undefined" && input instanceof Request) {
+    urlStr = input.url;
+    method = init?.method || input.method || "GET";
+    input.headers.forEach((v, k) => {
+      headersObj[k] = v;
+    });
+    if (init?.headers) {
+      new Headers(init.headers).forEach((v, k) => {
+        headersObj[k] = v;
+      });
+    }
+    signal = init?.signal ?? input.signal;
+    if (init?.body !== undefined && init?.body !== null) {
+      if (typeof init.body === "string") {
+        bodyBuf = Buffer.from(init.body, "utf-8");
+      } else if (init.body instanceof ArrayBuffer) {
+        bodyBuf = Buffer.from(init.body);
+      } else if (ArrayBuffer.isView(init.body)) {
+        bodyBuf = Buffer.from(init.body.buffer, init.body.byteOffset, init.body.byteLength);
+      } else {
+        bodyBuf = Buffer.from(await new Response(init.body as any).arrayBuffer());
+      }
+    } else if (input.body !== null && method !== "GET" && method !== "HEAD") {
+      bodyBuf = Buffer.from(await input.arrayBuffer());
+    }
+  } else {
+    urlStr = input instanceof URL ? input.toString() : String(input);
+    method = init?.method || "GET";
+    if (init?.headers) {
+      new Headers(init.headers).forEach((v, k) => {
+        headersObj[k] = v;
+      });
+    }
+    signal = init?.signal ?? undefined;
+    if (init?.body !== undefined && init?.body !== null) {
+      if (typeof init.body === "string") {
+        bodyBuf = Buffer.from(init.body, "utf-8");
+      } else if (init.body instanceof ArrayBuffer) {
+        bodyBuf = Buffer.from(init.body);
+      } else if (ArrayBuffer.isView(init.body)) {
+        bodyBuf = Buffer.from(init.body.buffer, init.body.byteOffset, init.body.byteLength);
+      } else {
+        bodyBuf = Buffer.from(await new Response(init.body as any).arrayBuffer());
+      }
+    }
+  }
+
+  if (bodyBuf && !Object.keys(headersObj).some((k) => k.toLowerCase() === "content-length")) {
+    headersObj["content-length"] = String(bodyBuf.byteLength);
+  }
+
+  const parsedUrl = new URL(urlStr);
+  const isHttps = parsedUrl.protocol === "https:";
+  const transport = isHttps ? https : http;
+  const agent = isHttps ? tursoHttpsAgent : tursoHttpAgent;
+
+  return new Promise<Response>((resolve, reject) => {
+    if (signal?.aborted) {
+      reject(signal.reason instanceof Error ? signal.reason : new Error("Request aborted"));
+      return;
+    }
+
+    let settled = false;
+    const req = transport.request(
+      parsedUrl,
+      {
+        method,
+        headers: headersObj,
+        agent,
+        timeout: 30000,
+      },
+      (res) => {
+        const resHeaders = new Headers();
+        for (const [k, v] of Object.entries(res.headers)) {
+          if (v === undefined) continue;
+          if (Array.isArray(v)) {
+            for (const item of v) resHeaders.append(k, item);
+          } else {
+            resHeaders.set(k, v);
+          }
+        }
+
+        const status = res.statusCode ?? 200;
+        const noBodyStatus = status === 204 || status === 205 || status === 304 || method.toUpperCase() === "HEAD";
+        const responseBody = noBodyStatus ? null : (Readable.toWeb(res) as unknown as ReadableStream);
+
+        const cleanupAbort = () => {
+          if (signal && onAbort) {
+            signal.removeEventListener("abort", onAbort);
+          }
+        };
+        res.once("end", cleanupAbort);
+        res.once("close", cleanupAbort);
+
+        settled = true;
+        resolve(
+          new Response(responseBody, {
+            status,
+            statusText: res.statusMessage || "",
+            headers: resHeaders,
+          })
+        );
+      }
+    );
+
+    const onAbort = () => {
+      const err = signal?.reason instanceof Error ? signal.reason : new Error("Request aborted");
+      req.destroy(err);
+      if (!settled) {
+        settled = true;
+        reject(err);
+      }
+    };
+
+    if (signal) {
+      signal.addEventListener("abort", onAbort, { once: true });
+    }
+
+    req.on("timeout", () => {
+      const err = Object.assign(new Error(`Turso socket/connect timeout after 30000ms (${parsedUrl.host})`), {
+        code: "ETIMEDOUT",
+      });
+      req.destroy(err);
+    });
+
+    req.on("error", (err) => {
+      if (signal) {
+        signal.removeEventListener("abort", onAbort);
+      }
+      if (!settled) {
+        settled = true;
+        reject(err);
+      }
+    });
+
+    if (bodyBuf && bodyBuf.byteLength > 0) {
+      req.write(bodyBuf);
+    }
+    req.end();
+  });
+}
+
+function isTransientTursoNetworkError(err: any): boolean {
+  if (!err) return false;
+  const text = [
+    err?.message,
+    err?.code,
+    err?.name,
+    err?.cause?.message,
+    err?.cause?.code,
+    err?.cause?.name,
+    String(err),
+  ]
+    .filter(Boolean)
+    .join(" ")
+    .toLowerCase();
+
+  return (
+    text.includes("connect timeout") ||
+    text.includes("und_err_connect_timeout") ||
+    text.includes("etimedout") ||
+    text.includes("econnreset") ||
+    text.includes("econnrefused") ||
+    text.includes("ehostunreach") ||
+    text.includes("enetunreach") ||
+    text.includes("eai_again") ||
+    text.includes("epipe") ||
+    text.includes("socket hang up") ||
+    text.includes("fetch failed") ||
+    text.includes("timeout after")
+  );
+}
+
+async function executeTursoWithRetry<T>(fn: () => Promise<T>, maxRetries = 2): Promise<T> {
+  const backoffMs = [350, 900];
+  let lastError: any;
+  for (let attempt = 0; attempt <= maxRetries; attempt++) {
+    try {
+      return await fn();
+    } catch (err: any) {
+      lastError = err;
+      if (attempt < maxRetries && isTransientTursoNetworkError(err)) {
+        const wait = backoffMs[attempt] ?? 900;
+        await new Promise((r) => setTimeout(r, wait));
+        continue;
+      }
+      throw err;
+    }
+  }
+  throw lastError;
+}
+
+function createResilientTursoClient(rawUrl: string, rawToken: string) {
+  const { url } = normalizeTursoUrl(rawUrl);
+  const authToken = normalizeTursoToken(rawToken);
+  return createLibsqlClient({
+    url: url || rawUrl,
+    authToken,
+    fetch: tursoFetch as any,
+  });
+}
+
 function normalizeTursoUrl(rawUrl: string): { url: string; error?: string } {
   let url = (rawUrl || "").trim().replace(/^['"]+|['"]+$/g, "");
   if (!url) {
@@ -353,6 +584,7 @@ app.post("/api/turso/config", (req, res) => {
   if (!authToken) return res.status(400).json({ success: false, message: "Auth Token belum diisi." });
 
   saveStoredTursoConfig(url, authToken);
+  invalidateServerTursoClient();
   res.json({ success: true, message: "Konfigurasi Turso berhasil disimpan dan dibagikan ke semua perangkat.", url, authToken });
 });
 
@@ -362,6 +594,7 @@ app.delete("/api/turso/config", (req, res) => {
       fs.unlinkSync(TURSO_CONFIG_FILE);
     }
   } catch (e) {}
+  invalidateServerTursoClient();
   res.json({ success: true, message: "Konfigurasi Turso berhasil dihapus dari server." });
 });
 
@@ -383,9 +616,11 @@ app.post("/api/turso/test", async (req, res) => {
       });
     }
 
-    const client = createLibsqlClient({ url, authToken });
-    const result = await client.execute(
-      "SELECT name FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%' AND name NOT LIKE '_litestream_%'"
+    const client = createResilientTursoClient(url, authToken);
+    const result = await executeTursoWithRetry(() =>
+      client.execute(
+        "SELECT name FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%' AND name NOT LIKE '_litestream_%'"
+      )
     );
 
     const tablesFound = result.rows.map((r: any) => String(r.name || r[0]));
@@ -438,7 +673,7 @@ app.post("/api/turso/init-schema", async (req, res) => {
     const authToken = normalizeTursoToken(rawToken);
     if (!authToken) return res.status(400).json({ success: false, message: "Auth Token Turso belum diisi." });
 
-    const client = createLibsqlClient({ url, authToken });
+    const client = createResilientTursoClient(url, authToken);
 
     const ddl = [
       `CREATE TABLE IF NOT EXISTS school_settings (
@@ -577,10 +812,12 @@ app.post("/api/turso/migrate", async (req, res) => {
     const authToken = normalizeTursoToken(rawToken);
     if (!authToken) return res.status(400).json({ success: false, message: "Auth Token belum diisi." });
 
-    const client = createLibsqlClient({ url, authToken });
+    const client = createResilientTursoClient(url, authToken);
 
     // 1. Ensure tables exist
-    const testRes = await client.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='school_settings'");
+    const testRes = await executeTursoWithRetry(() =>
+      client.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='school_settings'")
+    );
     if (!testRes.rows || testRes.rows.length === 0) {
       // Create tables first
       const initUrl = "http://127.0.0.1:3000/api/turso/init-schema";
@@ -771,28 +1008,74 @@ app.post("/api/turso/migrate", async (req, res) => {
 // ==============================================================================
 // 4. UNIFIED TURSO REALTIME DATA SYNC ENDPOINTS (Cross-Browser Shared)
 // ==============================================================================
+let cachedServerTursoKey = "";
+let cachedServerTursoClient: ReturnType<typeof createLibsqlClient> | null = null;
+
+function invalidateServerTursoClient() {
+  cachedServerTursoKey = "";
+  cachedServerTursoClient = null;
+}
+
 function getServerTursoClient() {
   const conf = getStoredTursoConfig();
   if (!conf.isConfigured || !conf.url || !conf.authToken) return null;
-  return createLibsqlClient({ url: conf.url, authToken: conf.authToken });
+  const { url } = normalizeTursoUrl(conf.url);
+  const authToken = normalizeTursoToken(conf.authToken);
+  if (!url || !authToken) return null;
+
+  const key = `${url}::${authToken}`;
+  if (!cachedServerTursoClient || cachedServerTursoKey !== key) {
+    cachedServerTursoClient = createLibsqlClient({
+      url,
+      authToken,
+      fetch: tursoFetch as any,
+    });
+    cachedServerTursoKey = key;
+  }
+  return cachedServerTursoClient;
+}
+
+function isDuplicateColumnOrSchemaError(err: any): boolean {
+  const msg = String(err?.message || err || "").toLowerCase();
+  return msg.includes("duplicate column") || msg.includes("already exists");
 }
 
 let examTokenColEnsured = false;
 async function ensureExamTokenColumn(client: ReturnType<typeof createLibsqlClient>) {
   if (examTokenColEnsured) return;
   try {
-    await client.execute("ALTER TABLE exams ADD COLUMN token_rotation_minutes INTEGER DEFAULT 0");
-  } catch {}
-  examTokenColEnsured = true;
+    await executeTursoWithRetry(() =>
+      client.execute("ALTER TABLE exams ADD COLUMN token_rotation_minutes INTEGER DEFAULT 0")
+    );
+    examTokenColEnsured = true;
+  } catch (err: any) {
+    if (isDuplicateColumnOrSchemaError(err)) {
+      examTokenColEnsured = true;
+    } else if (!isTransientTursoNetworkError(err)) {
+      examTokenColEnsured = true;
+    } else {
+      throw err;
+    }
+  }
 }
 
 let attemptRemainingColEnsured = false;
 async function ensureAttemptRemainingSecondsColumn(client: ReturnType<typeof createLibsqlClient>) {
   if (attemptRemainingColEnsured) return;
   try {
-    await client.execute("ALTER TABLE exam_attempts ADD COLUMN remaining_seconds INTEGER");
-  } catch {}
-  attemptRemainingColEnsured = true;
+    await executeTursoWithRetry(() =>
+      client.execute("ALTER TABLE exam_attempts ADD COLUMN remaining_seconds INTEGER")
+    );
+    attemptRemainingColEnsured = true;
+  } catch (err: any) {
+    if (isDuplicateColumnOrSchemaError(err)) {
+      attemptRemainingColEnsured = true;
+    } else if (!isTransientTursoNetworkError(err)) {
+      attemptRemainingColEnsured = true;
+    } else {
+      throw err;
+    }
+  }
 }
 
 // 4.1. Ambil seluruh data dari Turso Database untuk sinkronisasi instan antar-browser
@@ -806,13 +1089,15 @@ app.get("/api/turso/data", async (req, res) => {
 
     const studentId = typeof req.query.studentId === "string" ? req.query.studentId.trim() : "";
 
-    // Ambil semua tabel secara paralel, lacak status keberhasilan agar error sementara tidak menimpa data lokal dengan array kosong
+    // Ambil semua tabel secara paralel, dengan retry otomatis untuk timeout/kendala jaringan sementara
     const safeQuery = async (sql: string, args: any[] = []) => {
       try {
-        const result = await client.execute(args.length > 0 ? { sql, args } : sql);
+        const result = await executeTursoWithRetry(() =>
+          client.execute(args.length > 0 ? { sql, args } : sql)
+        );
         return { ok: true, rows: result.rows || [] };
-      } catch (qErr) {
-        console.warn(`Turso query warning (${sql.slice(0, 40)}):`, qErr);
+      } catch (qErr: any) {
+        console.warn(`Turso query warning (${sql.slice(0, 40)}):`, qErr?.message || qErr);
         return { ok: false, rows: [] };
       }
     };
@@ -982,33 +1267,35 @@ app.post("/api/turso/save-settings", async (req, res) => {
     const { settings } = req.body;
     if (!settings) return res.status(400).json({ success: false, message: "Data profil sekolah kosong." });
 
-    await client.execute({
-      sql: `INSERT OR REPLACE INTO school_settings (
-        id, app_name, school_name, school_npsn, school_address, school_city,
-        academic_year, semester, principal_name, principal_nip, logo_url,
-        dinas_name, kabupaten_name, signature_location, updated_at
-      ) VALUES ('default_school', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-      args: [
-        settings.appName || "SMART CBT PRO",
-        settings.schoolName || "SMP NEGERI 1 CERDAS MANDIRI",
-        settings.schoolNpsn || "",
-        settings.schoolAddress || "",
-        settings.schoolCity || "",
-        settings.academicYear || "2025/2026",
-        settings.semester || "Genap",
-        settings.principalName || "",
-        settings.principalNip || "",
-        settings.logoUrl || "",
-        settings.dinasName || "PEMERINTAH KABUPATEN KOTABARU",
-        settings.kabupatenName || "DINAS PENDIDIKAN DAN KEBUDAYAAN",
-        settings.signatureLocation || "Kotabaru",
-        new Date().toISOString(),
-      ],
-    });
+    await executeTursoWithRetry(() =>
+      client.execute({
+        sql: `INSERT OR REPLACE INTO school_settings (
+          id, app_name, school_name, school_npsn, school_address, school_city,
+          academic_year, semester, principal_name, principal_nip, logo_url,
+          dinas_name, kabupaten_name, signature_location, updated_at
+        ) VALUES ('default_school', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        args: [
+          settings.appName || "SMART CBT PRO",
+          settings.schoolName || "SMP NEGERI 1 CERDAS MANDIRI",
+          settings.schoolNpsn || "",
+          settings.schoolAddress || "",
+          settings.schoolCity || "",
+          settings.academicYear || "2025/2026",
+          settings.semester || "Genap",
+          settings.principalName || "",
+          settings.principalNip || "",
+          settings.logoUrl || "",
+          settings.dinasName || "PEMERINTAH KABUPATEN KOTABARU",
+          settings.kabupatenName || "DINAS PENDIDIKAN DAN KEBUDAYAAN",
+          settings.signatureLocation || "Kotabaru",
+          new Date().toISOString(),
+        ],
+      })
+    );
 
     return res.json({ success: true, message: "Profil sekolah berhasil disimpan ke Turso Database." });
   } catch (err: any) {
-    console.warn("Gagal simpan school_settings via server:", err);
+    console.warn("Gagal simpan school_settings via server:", err?.message || err);
     return res.status(500).json({ success: false, message: err?.message || String(err) });
   }
 });
@@ -1024,46 +1311,48 @@ app.post("/api/turso/save-exam", async (req, res) => {
 
     await ensureExamTokenColumn(client);
 
-    await client.execute({
-      sql: `INSERT OR REPLACE INTO exams (
-        id, title, subject_id, subject_name, teacher_id, teacher_name,
-        target_classes, start_time, end_time, duration_minutes, min_submit_minutes,
-        kkm, allow_retake, max_retakes, release_score, randomize_questions,
-        randomize_options, lockdown_browser, max_violations, token, token_rotation_minutes,
-        questions, status, is_active, created_at
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-      args: [
-        String(exam.id),
-        String(exam.title || "Ujian"),
-        String(exam.subjectId || ""),
-        String(exam.subjectName || "Mata Pelajaran"),
-        String(exam.teacherId || ""),
-        String(exam.teacherName || "Guru"),
-        JSON.stringify(Array.isArray(exam.targetClasses) ? exam.targetClasses : []),
-        String(exam.startTime || ""),
-        String(exam.endTime || ""),
-        Number(exam.durationMinutes) || 60,
-        Number(exam.minSubmitMinutes ?? 10),
-        Number(exam.kkm) || 75,
-        exam.allowRetake ? 1 : 0,
-        Number(exam.maxRetakes) || 1,
-        exam.releaseScore ? 1 : 0,
-        exam.randomizeQuestions ? 1 : 0,
-        exam.randomizeOptions ? 1 : 0,
-        exam.lockdownBrowser ? 1 : 0,
-        Number(exam.maxViolations) || 3,
-        String(exam.token || ""),
-        Number(exam.tokenRotationMinutes || 0),
-        JSON.stringify(Array.isArray(exam.questions) ? exam.questions : []),
-        String(exam.status || "active"),
-        exam.isActive === false ? 0 : 1,
-        String(exam.createdAt || new Date().toISOString()),
-      ],
-    });
+    await executeTursoWithRetry(() =>
+      client.execute({
+        sql: `INSERT OR REPLACE INTO exams (
+          id, title, subject_id, subject_name, teacher_id, teacher_name,
+          target_classes, start_time, end_time, duration_minutes, min_submit_minutes,
+          kkm, allow_retake, max_retakes, release_score, randomize_questions,
+          randomize_options, lockdown_browser, max_violations, token, token_rotation_minutes,
+          questions, status, is_active, created_at
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        args: [
+          String(exam.id),
+          String(exam.title || "Ujian"),
+          String(exam.subjectId || ""),
+          String(exam.subjectName || "Mata Pelajaran"),
+          String(exam.teacherId || ""),
+          String(exam.teacherName || "Guru"),
+          JSON.stringify(Array.isArray(exam.targetClasses) ? exam.targetClasses : []),
+          String(exam.startTime || ""),
+          String(exam.endTime || ""),
+          Number(exam.durationMinutes) || 60,
+          Number(exam.minSubmitMinutes ?? 10),
+          Number(exam.kkm) || 75,
+          exam.allowRetake ? 1 : 0,
+          Number(exam.maxRetakes) || 1,
+          exam.releaseScore ? 1 : 0,
+          exam.randomizeQuestions ? 1 : 0,
+          exam.randomizeOptions ? 1 : 0,
+          exam.lockdownBrowser ? 1 : 0,
+          Number(exam.maxViolations) || 3,
+          String(exam.token || ""),
+          Number(exam.tokenRotationMinutes || 0),
+          JSON.stringify(Array.isArray(exam.questions) ? exam.questions : []),
+          String(exam.status || "active"),
+          exam.isActive === false ? 0 : 1,
+          String(exam.createdAt || new Date().toISOString()),
+        ],
+      })
+    );
 
     return res.json({ success: true, message: "Ujian berhasil disimpan ke Turso." });
   } catch (err: any) {
-    console.warn("Gagal simpan exam via server:", err);
+    console.warn("Gagal simpan exam via server:", err?.message || err);
     return res.status(500).json({ success: false, message: err?.message || String(err) });
   }
 });
@@ -1077,12 +1366,12 @@ app.post("/api/turso/delete-exam", async (req, res) => {
     const { examId } = req.body;
     if (!examId) return res.status(400).json({ success: false, message: "examId wajib diisi." });
 
-    await client.execute({ sql: `DELETE FROM exam_attempts WHERE exam_id = ?`, args: [examId] });
-    await client.execute({ sql: `DELETE FROM exams WHERE id = ?`, args: [examId] });
+    await executeTursoWithRetry(() => client.execute({ sql: `DELETE FROM exam_attempts WHERE exam_id = ?`, args: [examId] }));
+    await executeTursoWithRetry(() => client.execute({ sql: `DELETE FROM exams WHERE id = ?`, args: [examId] }));
 
     return res.json({ success: true, message: "Ujian berhasil dihapus dari Turso." });
   } catch (err: any) {
-    console.warn("Gagal hapus exam via server:", err);
+    console.warn("Gagal hapus exam via server:", err?.message || err);
     return res.status(500).json({ success: false, message: err?.message || String(err) });
   }
 });
@@ -1103,46 +1392,48 @@ app.post("/api/turso/save-attempt", async (req, res) => {
         ? Math.max(0, Math.floor(attempt.remainingSeconds))
         : null;
 
-    await client.execute({
-      sql: `INSERT OR REPLACE INTO exam_attempts (
-        id, exam_id, exam_title, subject_name, student_id, student_name,
-        student_nisn, student_class, started_at, submitted_at, remaining_seconds,
-        answers, doubtful_answers, scores, total_score, max_possible_score,
-        total_earned_points, total_max_points, score_percentage, passed_kkm,
-        status, violation_count, violation_logs, teacher_feedback, is_graded
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-      args: [
-        attempt.id,
-        attempt.examId,
-        attempt.examTitle || "Ujian",
-        attempt.subjectName || "-",
-        attempt.studentId,
-        attempt.studentName,
-        attempt.studentNisn || "",
-        attempt.studentClass || "",
-        attempt.startedAt || new Date().toISOString(),
-        attempt.submittedAt || null,
-        remSec,
-        JSON.stringify(attempt.answers || {}),
-        JSON.stringify(attempt.doubtfulAnswers || {}),
-        JSON.stringify(attempt.scores || {}),
-        Number(attempt.totalScore || 0),
-        Number(attempt.maxPossibleScore || 100),
-        Number(attempt.totalEarnedPoints || attempt.totalScore || 0),
-        Number(attempt.totalMaxPoints || attempt.maxPossibleScore || 100),
-        Number(attempt.scorePercentage || 0),
-        attempt.passedKkm ? 1 : 0,
-        attempt.status || "in_progress",
-        Number(attempt.violationCount || 0),
-        JSON.stringify(Array.isArray(attempt.violationLogs) ? attempt.violationLogs : []),
-        attempt.teacherFeedback || "",
-        attempt.isGraded ? 1 : 0,
-      ],
-    });
+    await executeTursoWithRetry(() =>
+      client.execute({
+        sql: `INSERT OR REPLACE INTO exam_attempts (
+          id, exam_id, exam_title, subject_name, student_id, student_name,
+          student_nisn, student_class, started_at, submitted_at, remaining_seconds,
+          answers, doubtful_answers, scores, total_score, max_possible_score,
+          total_earned_points, total_max_points, score_percentage, passed_kkm,
+          status, violation_count, violation_logs, teacher_feedback, is_graded
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        args: [
+          attempt.id,
+          attempt.examId,
+          attempt.examTitle || "Ujian",
+          attempt.subjectName || "-",
+          attempt.studentId,
+          attempt.studentName,
+          attempt.studentNisn || "",
+          attempt.studentClass || "",
+          attempt.startedAt || new Date().toISOString(),
+          attempt.submittedAt || null,
+          remSec,
+          JSON.stringify(attempt.answers || {}),
+          JSON.stringify(attempt.doubtfulAnswers || {}),
+          JSON.stringify(attempt.scores || {}),
+          Number(attempt.totalScore || 0),
+          Number(attempt.maxPossibleScore || 100),
+          Number(attempt.totalEarnedPoints || attempt.totalScore || 0),
+          Number(attempt.totalMaxPoints || attempt.maxPossibleScore || 100),
+          Number(attempt.scorePercentage || 0),
+          attempt.passedKkm ? 1 : 0,
+          attempt.status || "in_progress",
+          Number(attempt.violationCount || 0),
+          JSON.stringify(Array.isArray(attempt.violationLogs) ? attempt.violationLogs : []),
+          attempt.teacherFeedback || "",
+          attempt.isGraded ? 1 : 0,
+        ],
+      })
+    );
 
     return res.json({ success: true, message: "Attempt berhasil disimpan ke Turso." });
   } catch (err: any) {
-    console.warn("Gagal simpan attempt via server:", err);
+    console.warn("Gagal simpan attempt via server:", err?.message || err);
     return res.status(500).json({ success: false, message: err?.message || String(err) });
   }
 });

@@ -130,6 +130,9 @@ export default function AdminPanel({
     teacherName: '',
   });
 
+  const [isCustomNewSiswaClass, setIsCustomNewSiswaClass] = useState(false);
+  const [isCustomEditSiswaClass, setIsCustomEditSiswaClass] = useState(false);
+
   // Form states for EDITING entities
   const [editSiswaForm, setEditSiswaForm] = useState({
     name: '',
@@ -300,9 +303,15 @@ export default function AdminPanel({
     );
   }).sort((a, b) => a.name.localeCompare(b.name));
 
-  // Get available classes from students
-  const availableClasses = Array.from(new Set(users.filter(u => u.role === 'siswa' && u.classGrade).map(u => u.classGrade as string))).sort();
-  if (availableClasses.length === 0) availableClasses.push('7A', '7B', '7C', '8A', '8B', '8C', '9A', '9B', '9C');
+  // Get available classes: always include standard 7A-9C + any classes found on students
+  const defaultSchoolClasses = ['7A', '7B', '7C', '8A', '8B', '8C', '9A', '9B', '9C'];
+  const studentClassList = users
+    .filter((u) => u.role === 'siswa' && u.classGrade)
+    .map((u) => String(u.classGrade).trim())
+    .filter(Boolean);
+  const availableClasses = Array.from(
+    new Set<string>([...defaultSchoolClasses, ...studentClassList])
+  ).sort((a, b) => a.localeCompare(b, 'id', { numeric: true }));
 
   const filteredSubjects = subjects.filter(
     (m) =>
@@ -321,6 +330,7 @@ export default function AdminPanel({
     setIsSavingSiswa(true);
     await new Promise((r) => setTimeout(r, 600));
 
+    const trimmedClassGrade = (newSiswa.classGrade || '7A').trim();
     const created: User = {
       id: 'user_siswa_' + Date.now(),
       name: newSiswa.name,
@@ -328,13 +338,14 @@ export default function AdminPanel({
       username: newSiswa.username || `siswa_${newSiswa.nip_nisn}`,
       password: newSiswa.password || 'password123',
       role: 'siswa',
-      classGrade: newSiswa.classGrade,
+      classGrade: trimmedClassGrade,
       gender: newSiswa.gender,
     };
 
     onUpdateUsers([...users, created]);
     setIsAddSiswaModalOpen(false);
     setIsSavingSiswa(false);
+    setIsCustomNewSiswaClass(false);
     setNewSiswa({
       name: '',
       nip_nisn: '',
@@ -347,13 +358,19 @@ export default function AdminPanel({
   };
 
   const handleOpenEditSiswa = (siswa: User) => {
+    const rawClass = String(siswa.classGrade || '8A').trim();
+    const matchedExisting = availableClasses.find(
+      (cls) => cls.toLowerCase() === rawClass.toLowerCase()
+    );
+    const resolvedClass = matchedExisting || rawClass || '8A';
     setEditingSiswa(siswa);
+    setIsCustomEditSiswaClass(false);
     setEditSiswaForm({
       name: siswa.name,
       nip_nisn: siswa.nip_nisn,
       username: siswa.username,
       password: siswa.password || 'password123',
-      classGrade: siswa.classGrade || '8A',
+      classGrade: resolvedClass,
       gender: siswa.gender || 'L',
     });
     setIsEditSiswaModalOpen(true);
@@ -374,7 +391,7 @@ export default function AdminPanel({
           nip_nisn: editSiswaForm.nip_nisn,
           username: editSiswaForm.username || `siswa_${editSiswaForm.nip_nisn}`,
           password: editSiswaForm.password || 'password123',
-          classGrade: editSiswaForm.classGrade,
+          classGrade: (editSiswaForm.classGrade || '8A').trim(),
           gender: editSiswaForm.gender,
         };
       }
@@ -1275,7 +1292,13 @@ export default function AdminPanel({
 
               <button
                 id="btn-open-modal-add-siswa"
-                onClick={() => setIsAddSiswaModalOpen(true)}
+                onClick={() => {
+                  setIsCustomNewSiswaClass(false);
+                  if (!newSiswa.classGrade) {
+                    setNewSiswa((prev) => ({ ...prev, classGrade: '8A' }));
+                  }
+                  setIsAddSiswaModalOpen(true);
+                }}
                 className="px-3.5 py-2 bg-rose-600 hover:bg-rose-700 text-white rounded-xl text-xs font-bold flex items-center gap-1.5 transition cursor-pointer shadow-xs"
               >
                 <UserPlus className="w-3.5 h-3.5" />
@@ -2090,17 +2113,42 @@ export default function AdminPanel({
                 <div>
                   <label className="block font-semibold text-slate-700 mb-1">Kelas</label>
                   <select
-                    value={newSiswa.classGrade}
-                    onChange={(e) => setNewSiswa({ ...newSiswa, classGrade: e.target.value })}
-                    className="w-full p-2.5 bg-slate-50 border border-slate-300 rounded-xl"
+                    value={isCustomNewSiswaClass ? '__custom__' : newSiswa.classGrade}
+                    onChange={(e) => {
+                      if (e.target.value === '__custom__') {
+                        setIsCustomNewSiswaClass(true);
+                        setNewSiswa({ ...newSiswa, classGrade: '' });
+                      } else {
+                        setIsCustomNewSiswaClass(false);
+                        setNewSiswa({ ...newSiswa, classGrade: e.target.value });
+                      }
+                    }}
+                    className="w-full p-2.5 bg-slate-50 border border-slate-300 rounded-xl font-semibold"
                   >
-                    <option value="7A">7A</option>
-                    <option value="7B">7B</option>
-                    <option value="8A">8A</option>
-                    <option value="8B">8B</option>
-                    <option value="9A">9A</option>
-                    <option value="9B">9B</option>
+                    {Array.from(
+                      new Set<string>([
+                        ...availableClasses,
+                        ...(!isCustomNewSiswaClass && newSiswa.classGrade ? [newSiswa.classGrade] : []),
+                      ])
+                    )
+                      .sort((a, b) => a.localeCompare(b, 'id', { numeric: true }))
+                      .map((cls) => (
+                        <option key={cls} value={cls}>
+                          {cls}
+                        </option>
+                      ))}
+                    <option value="__custom__">+ Ketik Kelas Lain...</option>
                   </select>
+                  {isCustomNewSiswaClass && (
+                    <input
+                      type="text"
+                      placeholder="Contoh: 7D"
+                      value={newSiswa.classGrade}
+                      onChange={(e) => setNewSiswa({ ...newSiswa, classGrade: e.target.value.toUpperCase() })}
+                      className="w-full mt-1.5 p-2 bg-white border border-rose-300 rounded-xl font-semibold text-slate-900"
+                      required
+                    />
+                  )}
                 </div>
               </div>
 
@@ -2210,17 +2258,46 @@ export default function AdminPanel({
                 <div>
                   <label className="block font-semibold text-slate-700 mb-1">Kelas</label>
                   <select
-                    value={editSiswaForm.classGrade}
-                    onChange={(e) => setEditSiswaForm({ ...editSiswaForm, classGrade: e.target.value })}
+                    value={isCustomEditSiswaClass ? '__custom__' : editSiswaForm.classGrade}
+                    onChange={(e) => {
+                      if (e.target.value === '__custom__') {
+                        setIsCustomEditSiswaClass(true);
+                        setEditSiswaForm({ ...editSiswaForm, classGrade: '' });
+                      } else {
+                        setIsCustomEditSiswaClass(false);
+                        setEditSiswaForm({ ...editSiswaForm, classGrade: e.target.value });
+                      }
+                    }}
                     className="w-full p-2.5 bg-slate-50 border border-slate-300 rounded-xl font-semibold"
                   >
-                    <option value="7A">7A</option>
-                    <option value="7B">7B</option>
-                    <option value="8A">8A</option>
-                    <option value="8B">8B</option>
-                    <option value="9A">9A</option>
-                    <option value="9B">9B</option>
+                    {Array.from(
+                      new Set<string>([
+                        ...availableClasses,
+                        ...(!isCustomEditSiswaClass && editSiswaForm.classGrade
+                          ? [editSiswaForm.classGrade]
+                          : []),
+                      ])
+                    )
+                      .sort((a, b) => a.localeCompare(b, 'id', { numeric: true }))
+                      .map((cls) => (
+                        <option key={cls} value={cls}>
+                          {cls}
+                        </option>
+                      ))}
+                    <option value="__custom__">+ Ketik Kelas Lain...</option>
                   </select>
+                  {isCustomEditSiswaClass && (
+                    <input
+                      type="text"
+                      placeholder="Contoh: 7D"
+                      value={editSiswaForm.classGrade}
+                      onChange={(e) =>
+                        setEditSiswaForm({ ...editSiswaForm, classGrade: e.target.value.toUpperCase() })
+                      }
+                      className="w-full mt-1.5 p-2 bg-white border border-indigo-300 rounded-xl font-semibold text-slate-900"
+                      required
+                    />
+                  )}
                 </div>
               </div>
 
