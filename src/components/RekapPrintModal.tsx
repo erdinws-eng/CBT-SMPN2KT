@@ -1,4 +1,6 @@
-import { Printer, X, FileSpreadsheet, Award } from 'lucide-react';
+import { useEffect } from 'react';
+import { createPortal } from 'react-dom';
+import { Printer, X } from 'lucide-react';
 import { Exam, ExamAttempt, SchoolSettings } from '../types';
 
 interface RekapPrintModalProps {
@@ -18,6 +20,14 @@ export default function RekapPrintModal({
   settings,
   teacherNip,
 }: RekapPrintModalProps) {
+  useEffect(() => {
+    if (!isOpen || !exam || typeof document === 'undefined') return;
+    document.body.classList.add('rekap-print-modal-open');
+    return () => {
+      document.body.classList.remove('rekap-print-modal-open');
+    };
+  }, [isOpen, exam]);
+
   if (!isOpen || !exam) return null;
 
   const kkm = exam.kkm || 75;
@@ -49,24 +59,27 @@ export default function RekapPrintModal({
   })();
 
   const passedCount = uniqueStudentAttempts.filter((a) => a.scorePercentage >= kkm).length;
-  const failedCount = uniqueStudentAttempts.length - passedCount;
   const passRate = uniqueStudentAttempts.length > 0 ? Math.round((passedCount / uniqueStudentAttempts.length) * 100) : 0;
   const averageScore =
     uniqueStudentAttempts.length > 0
       ? Math.round(uniqueStudentAttempts.reduce((acc, a) => acc + a.scorePercentage, 0) / uniqueStudentAttempts.length)
       : 0;
 
-  return (
+  const handlePrint = () => {
+    window.print();
+  };
+
+  const modalContent = (
     <div
       id="rekap-print-modal-overlay"
-      className="fixed inset-0 z-50 overflow-y-auto bg-slate-900/60 backdrop-blur-xs flex items-center justify-center p-2 sm:p-4"
+      className="fixed inset-0 z-50 bg-slate-900/70 backdrop-blur-xs flex items-center justify-center p-2 sm:p-4"
     >
       <div
         id="rekap-print-container"
-        className="bg-white rounded-2xl shadow-2xl w-full max-w-5xl border border-slate-200 overflow-hidden my-auto"
+        className="bg-slate-100 rounded-2xl shadow-2xl w-full max-w-5xl max-h-[92vh] flex flex-col border border-slate-200 overflow-hidden"
       >
         {/* Modal Top Bar (Hidden during printing) */}
-        <div className="no-print bg-slate-900 text-white px-6 py-4 flex items-center justify-between">
+        <div className="no-print shrink-0 bg-slate-900 text-white px-6 py-4 flex items-center justify-between">
           <div className="flex items-center gap-2">
             <Printer className="w-5 h-5 text-indigo-400" />
             <h3 className="font-bold text-base sm:text-lg">
@@ -76,13 +89,15 @@ export default function RekapPrintModal({
           <div className="flex items-center gap-3">
             <button
               id="btn-trigger-print-rekap"
-              onClick={() => window.print()}
+              type="button"
+              onClick={handlePrint}
               className="px-4 py-2 bg-indigo-600 hover:bg-indigo-700 text-white text-xs sm:text-sm font-bold rounded-xl flex items-center gap-2 transition shadow-xs cursor-pointer"
             >
               <Printer className="w-4 h-4" />
               Cetak / Simpan PDF
             </button>
             <button
+              type="button"
               onClick={onClose}
               className="p-1.5 text-slate-400 hover:text-white rounded-lg hover:bg-slate-800 transition cursor-pointer"
             >
@@ -91,179 +106,193 @@ export default function RekapPrintModal({
           </div>
         </div>
 
-        {/* Printable Paper Area */}
-        <div id="printable-rekap-sheet" className="p-8 sm:p-12 text-slate-900 bg-white max-h-[80vh] overflow-y-auto print:max-h-none print:overflow-visible print:p-0">
-          {/* KOP SURAT SEKOLAH */}
-          <div className="border-b-4 border-double border-slate-900 pb-4 mb-6 flex items-center gap-4">
-            <div className="w-24 sm:w-28 h-24 sm:h-28 shrink-0 flex items-center justify-center">
-              {settings.logoUrl ? (
-                <img src={settings.logoUrl} alt="Logo" className="max-w-full max-h-full object-contain" />
-              ) : (
-                <div className="w-full h-full border-2 border-slate-800 rounded-full font-black text-xs text-center flex items-center justify-center p-1">
-                  LOGO SEKOLAH
+        {/* Scrollable Paper Preview Area */}
+        <div
+          id="rekap-print-scroll-wrapper"
+          className="flex-1 overflow-y-auto p-4 sm:p-8 bg-slate-200/80"
+        >
+          {/* Printable A4 Paper Sheet */}
+          <div
+            id="printable-rekap-sheet"
+            className="w-full max-w-[210mm] min-h-[270mm] mx-auto bg-white text-slate-900 shadow-lg border border-slate-300 p-6 sm:p-[12mm] flex flex-col justify-between"
+          >
+            <div>
+              {/* KOP SURAT SEKOLAH */}
+              <div className="border-b-4 border-double border-slate-900 pb-4 mb-5 flex items-center gap-4">
+                <div className="w-20 sm:w-24 h-20 sm:h-24 shrink-0 flex items-center justify-center">
+                  {settings.logoUrl ? (
+                    <img src={settings.logoUrl} alt="Logo" className="max-w-full max-h-full object-contain" />
+                  ) : (
+                    <div className="w-full h-full border-2 border-slate-800 rounded-full font-black text-xs text-center flex items-center justify-center p-1">
+                      LOGO SEKOLAH
+                    </div>
+                  )}
                 </div>
-              )}
-            </div>
-            <div className="flex-1 text-center">
-              <p className="text-lg sm:text-xl font-black uppercase tracking-wider text-slate-900 mb-0.5">
-                {settings.dinasName || 'DINAS PENDIDIKAN DAN KEBUDAYAAN'}
-              </p>
-              <p className="text-xl sm:text-2xl font-black uppercase tracking-wider text-slate-900 mb-1">
-                {settings.kabupatenName || 'PEMERINTAH KABUPATEN KOTABARU'}
-              </p>
-              <h2 className="text-2xl sm:text-3xl font-black uppercase tracking-wider text-slate-900 mb-1.5">
-                {settings.schoolName}
-              </h2>
-              <p className="text-sm text-slate-800 font-semibold mb-0.5">
-                {settings.schoolAddress} • {settings.schoolCity} • NPSN: {settings.schoolNpsn}
-              </p>
-              <p className="text-sm text-slate-800 font-semibold">
-                Tahun Ajaran: {settings.academicYear} | Semester: {settings.semester}
-              </p>
-            </div>
-          </div>
+                <div className="flex-1 text-center">
+                  <p className="text-base sm:text-lg font-black uppercase tracking-wider text-slate-900 mb-0.5">
+                    {settings.dinasName || 'DINAS PENDIDIKAN DAN KEBUDAYAAN'}
+                  </p>
+                  <p className="text-lg sm:text-xl font-black uppercase tracking-wider text-slate-900 mb-1">
+                    {settings.kabupatenName || 'PEMERINTAH KABUPATEN KOTABARU'}
+                  </p>
+                  <h2 className="text-xl sm:text-2xl font-black uppercase tracking-wider text-slate-900 mb-1">
+                    {settings.schoolName}
+                  </h2>
+                  <p className="text-xs sm:text-sm text-slate-800 font-semibold mb-0.5">
+                    {settings.schoolAddress} • {settings.schoolCity} • NPSN: {settings.schoolNpsn}
+                  </p>
+                  <p className="text-xs sm:text-sm text-slate-800 font-semibold">
+                    Tahun Ajaran: {settings.academicYear} | Semester: {settings.semester}
+                  </p>
+                </div>
+              </div>
 
-          {/* DOCUMENT TITLE */}
-          <div className="text-center mb-6">
-            <h3 className="text-base sm:text-lg font-black uppercase underline tracking-wider">
-              DAFTAR REKAPITULASI NILAI ASESMEN COMPUTER-BASED TEST (CBT)
-            </h3>
-          </div>
+              {/* DOCUMENT TITLE */}
+              <div className="text-center mb-5">
+                <h3 className="text-sm sm:text-base font-black uppercase underline tracking-wider">
+                  DAFTAR REKAPITULASI NILAI ASESMEN COMPUTER-BASED TEST (CBT)
+                </h3>
+              </div>
 
-          {/* EXAM META GRID */}
-          <div className="grid grid-cols-2 gap-x-8 gap-y-4 text-xs mb-6 bg-slate-50 p-4 rounded-xl border border-slate-200 print:bg-transparent print:border-none print:p-0">
-            <div className="grid grid-cols-[100px_10px_1fr] sm:grid-cols-[120px_10px_1fr] gap-x-2 gap-y-2">
-              <span className="text-slate-500 font-medium">Mata Pelajaran</span>
-              <span className="text-slate-500">:</span>
-              <strong className="text-slate-900">{exam.subjectName}</strong>
-              
-              <span className="text-slate-500 font-medium">Judul Ujian</span>
-              <span className="text-slate-500">:</span>
-              <strong className="text-slate-900">{exam.title}</strong>
+              {/* EXAM META GRID */}
+              <div className="grid grid-cols-2 gap-x-8 gap-y-3 text-xs mb-5 bg-slate-50 p-3.5 rounded-xl border border-slate-200 print:bg-transparent print:border-none print:p-0">
+                <div className="grid grid-cols-[100px_10px_1fr] sm:grid-cols-[115px_10px_1fr] gap-x-2 gap-y-1.5">
+                  <span className="text-slate-600 font-medium">Mata Pelajaran</span>
+                  <span className="text-slate-600">:</span>
+                  <strong className="text-slate-900">{exam.subjectName}</strong>
 
-              <span className="text-slate-500 font-medium">Kelas Sasaran</span>
-              <span className="text-slate-500">:</span>
-              <strong className="text-slate-900">{exam.targetClasses.join(', ')}</strong>
-            </div>
-            
-            <div className="grid grid-cols-[110px_10px_1fr] sm:grid-cols-[130px_10px_1fr] gap-x-2 gap-y-2">
-              <span className="text-slate-500 font-medium">Guru Pengampu</span>
-              <span className="text-slate-500">:</span>
-              <strong className="text-slate-900">{exam.teacherName}</strong>
+                  <span className="text-slate-600 font-medium">Judul Ujian</span>
+                  <span className="text-slate-600">:</span>
+                  <strong className="text-slate-900">{exam.title}</strong>
 
-              <span className="text-slate-500 font-medium">Nilai KKM</span>
-              <span className="text-slate-500">:</span>
-              <strong className="text-slate-900">{kkm}</strong>
+                  <span className="text-slate-600 font-medium">Kelas Sasaran</span>
+                  <span className="text-slate-600">:</span>
+                  <strong className="text-slate-900">{exam.targetClasses.join(', ')}</strong>
+                </div>
 
-              <span className="text-slate-500 font-medium">Tanggal Cetak</span>
-              <span className="text-slate-500">:</span>
-              <strong className="text-slate-900">
-                {new Date().toLocaleDateString('id-ID', {
-                  day: 'numeric',
-                  month: 'long',
-                  year: 'numeric',
-                })}
-              </strong>
-            </div>
-          </div>
-          {/* TABLE OF RECAP RESULTS (NISN and KELAS explicitly separated) */}
-          <div className="overflow-x-auto mb-8">
-            <table className="w-full text-left text-xs border border-slate-400 border-collapse">
-              <thead>
-                <tr className="bg-slate-100 text-slate-800 uppercase font-black border-b border-slate-400">
-                  <th className="p-2.5 border border-slate-400 text-center w-10">NO</th>
-                  <th className="p-2.5 border border-slate-400 text-center w-28">NISN</th>
-                  <th className="p-2.5 border border-slate-400">Nama Siswa</th>
-                  <th className="p-2.5 border border-slate-400 text-center w-16">Kelas</th>
-                  <th className="p-2.5 border border-slate-400 text-center w-16">KKM</th>
-                  <th className="p-2.5 border border-slate-400 text-center w-20">Nilai Akhir</th>
-                  <th className="p-2.5 border border-slate-400 text-center w-28">Keterangan</th>
-                </tr>
-              </thead>
-              <tbody>
-                {uniqueStudentAttempts.length === 0 ? (
-                  <tr>
-                    <td colSpan={7} className="p-6 text-center text-slate-400 border border-slate-400">
-                      Belum ada siswa yang menyelesaikan ujian ini.
-                    </td>
-                  </tr>
-                ) : (
-                  uniqueStudentAttempts.map((att, idx) => {
-                    const isPassed = att.scorePercentage >= kkm;
-                    return (
-                      <tr key={att.id} className="border-b border-slate-300">
-                        <td className="p-2 border border-slate-300 text-center font-bold text-slate-600">
-                          {idx + 1}
-                        </td>
-                        <td className="p-2 border border-slate-300 font-mono text-center font-semibold">
-                          {att.studentNisn}
-                        </td>
-                        <td className="p-2 border border-slate-300 font-bold text-slate-900">
-                          {att.studentName}
-                        </td>
-                        <td className="p-2 border border-slate-300 text-center font-semibold text-slate-700">
-                          {att.studentClass}
-                        </td>
-                        <td className="p-2 border border-slate-300 text-center text-slate-600">
-                          {kkm}
-                        </td>
-                        <td className="p-2 border border-slate-300 text-center font-black text-sm">
-                          {att.scorePercentage}
-                        </td>
-                        <td className="p-2 border border-slate-300 text-center font-bold">
-                          {isPassed ? (
-                            <span className="text-emerald-800">TUNTAS</span>
-                          ) : (
-                            <span className="text-rose-700">REMEDIAL</span>
-                          )}
+                <div className="grid grid-cols-[105px_10px_1fr] sm:grid-cols-[120px_10px_1fr] gap-x-2 gap-y-1.5">
+                  <span className="text-slate-600 font-medium">Guru Pengampu</span>
+                  <span className="text-slate-600">:</span>
+                  <strong className="text-slate-900">{exam.teacherName}</strong>
+
+                  <span className="text-slate-600 font-medium">Nilai KKM</span>
+                  <span className="text-slate-600">:</span>
+                  <strong className="text-slate-900">{kkm}</strong>
+
+                  <span className="text-slate-600 font-medium">Tanggal Cetak</span>
+                  <span className="text-slate-600">:</span>
+                  <strong className="text-slate-900">
+                    {new Date().toLocaleDateString('id-ID', {
+                      day: 'numeric',
+                      month: 'long',
+                      year: 'numeric',
+                    })}
+                  </strong>
+                </div>
+              </div>
+
+              {/* TABLE OF RECAP RESULTS (NISN and KELAS explicitly separated) */}
+              <div className="overflow-x-auto print:overflow-visible mb-6">
+                <table className="w-full text-left text-xs border border-slate-400 border-collapse">
+                  <thead>
+                    <tr className="bg-slate-100 text-slate-800 uppercase font-black border-b border-slate-400">
+                      <th className="p-2 border border-slate-400 text-center w-10">NO</th>
+                      <th className="p-2 border border-slate-400 text-center w-28">NISN</th>
+                      <th className="p-2 border border-slate-400">Nama Siswa</th>
+                      <th className="p-2 border border-slate-400 text-center w-16">Kelas</th>
+                      <th className="p-2 border border-slate-400 text-center w-16">KKM</th>
+                      <th className="p-2 border border-slate-400 text-center w-20">Nilai Akhir</th>
+                      <th className="p-2 border border-slate-400 text-center w-28">Keterangan</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {uniqueStudentAttempts.length === 0 ? (
+                      <tr>
+                        <td colSpan={7} className="p-6 text-center text-slate-400 border border-slate-400">
+                          Belum ada siswa yang menyelesaikan ujian ini.
                         </td>
                       </tr>
-                    );
-                  })
-                )}
-              </tbody>
-              {uniqueStudentAttempts.length > 0 && (
-                <tfoot>
-                  <tr className="bg-slate-100 font-bold border-t-2 border-slate-400 text-slate-900">
-                    <td colSpan={5} className="p-2 border border-slate-400 text-right uppercase text-[11px]">
-                      Rata-Rata Nilai Tertinggi Siswa ({uniqueStudentAttempts.length} Siswa):
-                    </td>
-                    <td className="p-2 border border-slate-400 text-center font-black text-sm">
-                      {averageScore}
-                    </td>
-                    <td className="p-2 border border-slate-400 text-center text-[11px] font-bold">
-                      {passRate}% Tuntas ({passedCount}/{uniqueStudentAttempts.length})
-                    </td>
-                  </tr>
-                </tfoot>
-              )}
-            </table>
-          </div>
-
-          {/* SIGNATURE SECTION */}
-          <div className="grid grid-cols-2 gap-8 text-xs pt-6 break-inside-avoid">
-            <div className="text-center">
-              <p className="text-slate-500 mb-1">Mengetahui,</p>
-              <p className="font-bold text-slate-800 mb-16">Kepala {settings.schoolName}</p>
-              <p className="font-bold text-slate-900 underline text-sm">{settings.principalName}</p>
-              <p className="text-slate-500 font-mono">NIP. {settings.principalNip}</p>
+                    ) : (
+                      uniqueStudentAttempts.map((att, idx) => {
+                        const isPassed = att.scorePercentage >= kkm;
+                        return (
+                          <tr key={att.id} className="border-b border-slate-300">
+                            <td className="p-2 border border-slate-300 text-center font-bold text-slate-600">
+                              {idx + 1}
+                            </td>
+                            <td className="p-2 border border-slate-300 font-mono text-center font-semibold">
+                              {att.studentNisn}
+                            </td>
+                            <td className="p-2 border border-slate-300 font-bold text-slate-900">
+                              {att.studentName}
+                            </td>
+                            <td className="p-2 border border-slate-300 text-center font-semibold text-slate-700">
+                              {att.studentClass}
+                            </td>
+                            <td className="p-2 border border-slate-300 text-center text-slate-600">
+                              {kkm}
+                            </td>
+                            <td className="p-2 border border-slate-300 text-center font-black text-sm">
+                              {att.scorePercentage}
+                            </td>
+                            <td className="p-2 border border-slate-300 text-center font-bold">
+                              {isPassed ? (
+                                <span className="text-emerald-800">TUNTAS</span>
+                              ) : (
+                                <span className="text-rose-700">REMEDIAL</span>
+                              )}
+                            </td>
+                          </tr>
+                        );
+                      })
+                    )}
+                  </tbody>
+                  {uniqueStudentAttempts.length > 0 && (
+                    <tfoot>
+                      <tr className="bg-slate-100 font-bold border-t-2 border-slate-400 text-slate-900">
+                        <td colSpan={5} className="p-2 border border-slate-400 text-right uppercase text-[11px]">
+                          Rata-Rata Nilai Tertinggi Siswa ({uniqueStudentAttempts.length} Siswa):
+                        </td>
+                        <td className="p-2 border border-slate-400 text-center font-black text-sm">
+                          {averageScore}
+                        </td>
+                        <td className="p-2 border border-slate-400 text-center text-[11px] font-bold">
+                          {passRate}% Tuntas ({passedCount}/{uniqueStudentAttempts.length})
+                        </td>
+                      </tr>
+                    </tfoot>
+                  )}
+                </table>
+              </div>
             </div>
-            <div className="text-center">
-              <p className="text-slate-500 mb-1">
-                {settings.signatureLocation || settings.schoolCity},{' '}
-                {new Date().toLocaleDateString('id-ID', {
-                  day: 'numeric',
-                  month: 'long',
-                  year: 'numeric',
-                })}
-              </p>
-              <p className="font-bold text-slate-800 mb-16">Guru Mata Pelajaran</p>
-              <p className="font-bold text-slate-900 underline text-sm">{exam.teacherName}</p>
-              <p className="text-slate-500 font-mono">NIP. {teacherNip || "-"}</p>
+
+            {/* SIGNATURE SECTION */}
+            <div className="grid grid-cols-2 gap-8 text-xs pt-6 break-inside-avoid">
+              <div className="text-center">
+                <p className="text-slate-600 mb-1">Mengetahui,</p>
+                <p className="font-bold text-slate-800 mb-16">Kepala {settings.schoolName}</p>
+                <p className="font-bold text-slate-900 underline text-sm">{settings.principalName}</p>
+                <p className="text-slate-600 font-mono">NIP. {settings.principalNip}</p>
+              </div>
+              <div className="text-center">
+                <p className="text-slate-600 mb-1">
+                  {settings.signatureLocation || settings.schoolCity},{' '}
+                  {new Date().toLocaleDateString('id-ID', {
+                    day: 'numeric',
+                    month: 'long',
+                    year: 'numeric',
+                  })}
+                </p>
+                <p className="font-bold text-slate-800 mb-16">Guru Mata Pelajaran</p>
+                <p className="font-bold text-slate-900 underline text-sm">{exam.teacherName}</p>
+                <p className="text-slate-600 font-mono">NIP. {teacherNip || '-'}</p>
+              </div>
             </div>
           </div>
         </div>
       </div>
     </div>
   );
+
+  return typeof document !== 'undefined' ? createPortal(modalContent, document.body) : modalContent;
 }

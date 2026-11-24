@@ -48,14 +48,90 @@ html, body {
 }
 
 /* Print Optimization for School Grade Reports & Transcripts */
+@page {
+  size: A4 portrait;
+  margin: 10mm 12mm;
+}
+
 @media print {
+  html,
+  body {
+    width: 100% !important;
+    height: auto !important;
+    min-height: 0 !important;
+    margin: 0 !important;
+    padding: 0 !important;
+    background: #ffffff !important;
+    color: #000000 !important;
+    overflow: visible !important;
+    -webkit-print-color-adjust: exact !important;
+    print-color-adjust: exact !important;
+  }
   #cbt-exam-room {
     display: none !important;
     visibility: hidden !important;
   }
-  body {
+  body.rekap-print-modal-open > #root {
+    display: none !important;
+  }
+  #rekap-print-modal-overlay {
+    position: static !important;
+    inset: auto !important;
+    display: block !important;
+    width: 100% !important;
+    height: auto !important;
+    min-height: 0 !important;
+    margin: 0 !important;
+    padding: 0 !important;
     background: #ffffff !important;
-    color: #000000 !important;
+    overflow: visible !important;
+    backdrop-filter: none !important;
+  }
+  #rekap-print-container {
+    position: static !important;
+    display: block !important;
+    width: 100% !important;
+    max-width: none !important;
+    max-height: none !important;
+    margin: 0 !important;
+    padding: 0 !important;
+    border: none !important;
+    border-radius: 0 !important;
+    box-shadow: none !important;
+    background: #ffffff !important;
+    overflow: visible !important;
+  }
+  #rekap-print-scroll-wrapper {
+    display: block !important;
+    width: 100% !important;
+    max-width: none !important;
+    max-height: none !important;
+    margin: 0 !important;
+    padding: 0 !important;
+    background: #ffffff !important;
+    overflow: visible !important;
+  }
+  #printable-rekap-sheet {
+    width: 100% !important;
+    max-width: none !important;
+    max-height: none !important;
+    min-height: 266mm !important;
+    margin: 0 !important;
+    padding: 0 !important;
+    border: none !important;
+    box-shadow: none !important;
+    background: #ffffff !important;
+    overflow: visible !important;
+    display: flex !important;
+    flex-direction: column !important;
+    justify-content: space-between !important;
+  }
+  #printable-rekap-sheet thead {
+    display: table-header-group;
+  }
+  #printable-rekap-sheet tr {
+    break-inside: avoid;
+    page-break-inside: avoid;
   }
   .no-print {
     display: none !important;
