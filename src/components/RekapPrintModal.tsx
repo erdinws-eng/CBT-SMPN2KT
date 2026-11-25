@@ -129,13 +129,13 @@ export default function RekapPrintModal({
                   )}
                 </div>
                 <div className="flex-1 text-center">
-                  <p className="text-base sm:text-lg font-black uppercase tracking-wider text-slate-900 mb-0.5">
+                  <p className="text-xl sm:text-2xl print:text-2xl font-black uppercase tracking-wider leading-snug text-slate-900 mb-0.5">
                     {settings.dinasName || 'DINAS PENDIDIKAN DAN KEBUDAYAAN'}
                   </p>
-                  <p className="text-lg sm:text-xl font-black uppercase tracking-wider text-slate-900 mb-1">
+                  <p className="text-xl sm:text-2xl print:text-2xl font-black uppercase tracking-wider leading-snug text-slate-900 mb-0.5">
                     {settings.kabupatenName || 'PEMERINTAH KABUPATEN KOTABARU'}
                   </p>
-                  <h2 className="text-xl sm:text-2xl font-black uppercase tracking-wider text-slate-900 mb-1">
+                  <h2 className="text-xl sm:text-2xl print:text-2xl font-black uppercase tracking-wider leading-snug text-slate-900 mb-1">
                     {settings.schoolName}
                   </h2>
                   <p className="text-xs sm:text-sm text-slate-800 font-semibold mb-0.5">
